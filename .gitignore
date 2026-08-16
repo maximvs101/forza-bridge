@@ -1,0 +1,7 @@
+# Bytecode Python
+__pycache__/
+*.py[cod]
+
+# Etat local de l'interface (ports, selection de canaux) : regenere avec les
+# valeurs par defaut au premier lancement.
+config.json
