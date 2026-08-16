@@ -23,6 +23,14 @@ localhost (la politique de meme origine ne s'y applique pas) : passer
 `allowed_origins` pour restreindre par en-tete Origin.
 
 Chaque message est un objet JSON : {"speed": 42.1, "gear": 3, ...}
+
+Commandes acceptees d'un client (JSON) :
+  {"subscribe": ["speed", "gear"]}  restreint les canaux recus
+  {"subscribe": "*"}                revient a tout recevoir
+  {"full": true}                    etat complet a chaque trame, sans fusion
+Les deux peuvent etre combinees. `full` sert aux consommateurs qui traitent
+chaque message isolement (cables.gl et assimiles), ou un champ inchange
+arriverait "undefined" en mode differentiel.
 """
 
 from __future__ import annotations
@@ -111,6 +119,11 @@ class TelemetryWebSocketServer:
         self._last_activity = 0.0
         # connexion -> ensemble de canaux, ou None pour "tout"
         self._subscriptions: dict = {}
+        # Connexions qui veulent l'etat complet a chaque trame plutot que les
+        # seules variations. Destine aux consommateurs sans etat accumule
+        # (cables.gl traite chaque message isolement : un champ inchange y
+        # arriverait "undefined").
+        self._full_frames: dict = {}
         # Envois d'etat suivis separement des envois de telemetrie : les deux
         # flux ne doivent pas se bloquer l'un l'autre, mais chacun doit rester
         # borne pour un client lent.
@@ -275,8 +288,10 @@ class TelemetryWebSocketServer:
                      "status_interval": self.status_interval,
                      # Le client peut restreindre ce qu'il recoit en envoyant
                      # {"subscribe": ["speed", "gear"]} ; {"subscribe": "*"}
-                     # revient a tout recevoir.
-                     "subscribe_supported": True}
+                     # revient a tout recevoir. {"full": true} lui fait
+                     # recevoir l'etat complet a chaque trame, sans fusion.
+                     "subscribe_supported": True,
+                     "full_frames_supported": True}
             if self.hello_factory is not None:
                 try:
                     hello.update(self.hello_factory())
@@ -302,6 +317,7 @@ class TelemetryWebSocketServer:
             self._pending.pop(connection, None)
             self._status_pending.pop(connection, None)
             self._subscriptions.pop(connection, None)
+            self._full_frames.pop(connection, None)
 
     async def _handle_command(self, connection, brut) -> None:
         """Traite une commande client. Tout ce qui n'est pas reconnu est ignore."""
@@ -309,25 +325,36 @@ class TelemetryWebSocketServer:
             commande = json.loads(brut)
         except (TypeError, ValueError):
             return
-        if not isinstance(commande, dict) or "subscribe" not in commande:
+        if not isinstance(commande, dict):
+            return
+        if "subscribe" not in commande and "full" not in commande:
             return
 
-        demande = commande["subscribe"]
-        if demande is None or demande == "*":
-            self._subscriptions.pop(connection, None)
-            retenus = None
-        elif isinstance(demande, list):
-            self._subscriptions[connection] = frozenset(
-                str(nom) for nom in demande if isinstance(nom, (str, int, float)))
-            retenus = sorted(self._subscriptions[connection])
-        else:
-            return
+        if "subscribe" in commande:
+            demande = commande["subscribe"]
+            if demande is None or demande == "*":
+                self._subscriptions.pop(connection, None)
+            elif isinstance(demande, list):
+                self._subscriptions[connection] = frozenset(
+                    str(nom) for nom in demande if isinstance(nom, (str, int, float)))
+            else:
+                return
 
+        if "full" in commande:
+            if commande["full"]:
+                self._full_frames[connection] = True
+            else:
+                self._full_frames.pop(connection, None)
+
+        abonnement = self._subscriptions.get(connection)
+        retenus = None if abonnement is None else sorted(abonnement)
         await connection.send(json.dumps(
-            {"type": "subscribed", "channels": retenus}, separators=(",", ":")))
+            {"type": "subscribed", "channels": retenus,
+             "full": bool(self._full_frames.get(connection))},
+            separators=(",", ":")))
         # Etat complet filtre : le client a besoin d'une base immediate sur
         # laquelle appliquer les trames partielles suivantes.
-        snapshot = self._full_state_message(self._subscriptions.get(connection))
+        snapshot = self._full_state_message(abonnement)
         if snapshot is not None:
             await connection.send(snapshot)
 
@@ -410,14 +437,21 @@ class TelemetryWebSocketServer:
             return None
         return garde
 
-    def _full_state_message(self, abonnement=None) -> str | None:
-        """Etat complet courant, pour amorcer un client qui vient d'arriver."""
+    def _state_snapshot(self) -> dict | None:
+        """Copie de l'etat accumule, marquee comme trame complete."""
         with self._state_lock:
             if not self._state:
                 return None
             snapshot = dict(self._state)
         snapshot["type"] = "telemetry"
         snapshot["full"] = True
+        return snapshot
+
+    def _full_state_message(self, abonnement=None) -> str | None:
+        """Etat complet courant, pour amorcer un client qui vient d'arriver."""
+        snapshot = self._state_snapshot()
+        if snapshot is None:
+            return None
         filtre = self._filtre(snapshot, abonnement)
         if filtre is None:
             return None
@@ -435,12 +469,38 @@ class TelemetryWebSocketServer:
         serialisation propre, ce qui reste rentable puisque leur charge utile
         est plus petite.
         """
+        # Etat complet et sa serialisation : construits au plus une fois par
+        # diffusion, et seulement si un client les reclame.
+        plein: dict | None = None
+        plein_message: str | None = None
+
         for connection in list(self._clients):
             abonnement = self._subscriptions.get(connection)
-            if abonnement is None:
-                propre = message
+            veut_plein = bool(self._full_frames.get(connection))
+
+            if veut_plein:
+                if plein is None:
+                    plein = self._state_snapshot()
+                    if plein is None:
+                        continue
+                source = plein
             else:
-                filtre = self._filtre(payload, abonnement)
+                source = payload
+
+            if abonnement is None:
+                if not veut_plein:
+                    propre = message  # chemin rapide : deja serialise
+                else:
+                    if plein_message is None:
+                        try:
+                            plein_message = json.dumps(plein, separators=(",", ":"),
+                                                       allow_nan=False)
+                        except (TypeError, ValueError):
+                            self.dropped_count += 1
+                            continue
+                    propre = plein_message
+            else:
+                filtre = self._filtre(source, abonnement)
                 if filtre is None:
                     continue  # rien pour ce client dans cette trame
                 try:
