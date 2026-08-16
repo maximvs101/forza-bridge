@@ -59,7 +59,7 @@ class Bridge(threading.Thread):
                  selected_channels: frozenset[str] | None = None,
                  only_racing: bool = False,
                  send_car_name: bool = True,
-                 ws_server=None):
+                 ws_server=None, osc_client=None):
         super().__init__(daemon=True)
         self.listen_host = listen_host
         self.listen_port = listen_port
@@ -67,7 +67,9 @@ class Bridge(threading.Thread):
         self.only_racing = only_racing
         self.send_car_name = send_car_name
         self.ws_server = ws_server
-        self.osc_client = SimpleUDPClient(td_host, td_port)
+        # Injectable pour les tests : construire puis remplacer laissait une
+        # socket UDP ouverte derriere soi.
+        self.osc_client = osc_client or SimpleUDPClient(td_host, td_port)
 
         self.stop_event = threading.Event()
         self.bound = threading.Event()  # arme apres la tentative de bind
@@ -82,6 +84,7 @@ class Bridge(threading.Thread):
         # fournit le contenu du message d'accueil.
         if ws_server is not None:
             ws_server.hello_factory = self.hello
+            ws_server.status_factory = self.status
 
     @property
     def car_name(self) -> str:
@@ -175,6 +178,14 @@ class Bridge(threading.Thread):
                 # Charge utile construite paresseusement : le serveur limite
                 # la cadence et n'appellera cette fabrique que s'il emet.
                 self.ws_server.publish(lambda: self._ws_payload(values, names))
+
+    def status(self) -> dict:
+        """Complement du pont a la trame d'etat periodique du serveur."""
+        return {
+            "packets": self.packet_count,
+            "car_name": self._car_name,
+            "is_race_on": bool(self.latest_values.get("is_race_on", 0)),
+        }
 
     def _ws_payload(self, values: dict, names) -> dict:
         payload = {name: values[name] for name in names if name in values}

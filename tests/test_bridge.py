@@ -50,8 +50,7 @@ class BridgeTestCase(unittest.TestCase):
 
     def demarre(self, **kwargs) -> Bridge:
         self.bridge = Bridge(listen_port=self.port, td_host="127.0.0.1",
-                             td_port=free_port(), **kwargs)
-        self.bridge.osc_client = self.recorder
+                             td_port=free_port(), osc_client=self.recorder, **kwargs)
         self.bridge.start()
         self.assertTrue(self.bridge.bound.wait(5), "bind jamais tente")
         self.assertIsNone(self.bridge.error)
@@ -138,8 +137,8 @@ class TestRobustesse(BridgeTestCase):
         occupant = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         occupant.bind(("0.0.0.0", self.port))
         try:
-            bridge = Bridge(listen_port=self.port, td_host="127.0.0.1", td_port=free_port())
-            bridge.osc_client = self.recorder
+            bridge = Bridge(listen_port=self.port, td_host="127.0.0.1",
+                            td_port=free_port(), osc_client=self.recorder)
             bridge.start()
             self.assertTrue(bridge.bound.wait(5), "evenement 'bound' jamais arme")
             bridge.join(timeout=3)

@@ -79,7 +79,8 @@ class TelemetryWebSocketServer:
                  rate_hz: float = 60.0, allowed_origins=None,
                  hello_factory=None, serve_assets: bool = True,
                  differential: bool = True, epsilon: float = 1e-4,
-                 resync_seconds: float = 2.0):
+                 resync_seconds: float = 2.0, status_interval: float = 1.0,
+                 stale_after: float = 1.5, status_factory=None):
         self.host = host
         self.port = port
         self.rate_hz = rate_hz
@@ -97,9 +98,20 @@ class TelemetryWebSocketServer:
         # prochaine variation du champ perdu.
         self.resync_seconds = resync_seconds
 
+        # Trame d'etat periodique. Sans elle, un flux qui s'arrete se traduit
+        # par un simple silence : le client ne distingue pas "jeu en pause" de
+        # "pont mort". L'emission differentielle rend ce silence plus frequent.
+        self.status_interval = status_interval
+        self.stale_after = stale_after
+        self.status_factory = status_factory
+
         self._state: dict = {}
         self._state_lock = threading.Lock()
         self._next_full = 0.0
+        self._last_publish = 0.0
+        # connexion -> ensemble de canaux, ou None pour "tout"
+        self._subscriptions: dict = {}
+        self._status_tasks: set = set()
         # Fabrique du message d'accueil, fournie par le pont (seul a connaitre
         # les canaux reellement emis). Facultative : sans elle, un accueil
         # minimal est envoye quand meme.
@@ -176,7 +188,48 @@ class TelemetryWebSocketServer:
             self._stop_future = loop.create_future()
             self._loop = loop
             self._ready.set()
-            await self._stop_future
+            battement = loop.create_task(self._status_loop())
+            try:
+                await self._stop_future
+            finally:
+                battement.cancel()
+
+    async def _status_loop(self) -> None:
+        """Emet une trame d'etat a intervalle regulier, quoi qu'il arrive.
+
+        Elle sert de battement de coeur : son absence prolongee signale au
+        client que le pont lui-meme s'est arrete, ce qu'un flux simplement
+        silencieux ne permet pas de distinguer.
+        """
+        while True:
+            await asyncio.sleep(self.status_interval)
+            if not self._clients:
+                continue
+            message = json.dumps(self._status_payload(), separators=(",", ":"))
+            for connection in list(self._clients):
+                tache = asyncio.create_task(self._safe_send(connection, message))
+                # Reference forte : une tache seulement referencee par la
+                # boucle peut etre ramassee par le GC en cours d'execution.
+                self._status_tasks.add(tache)
+                tache.add_done_callback(self._status_tasks.discard)
+
+    def _status_payload(self) -> dict:
+        inactif = time.monotonic() - self._last_publish if self._last_publish else None
+        etat = {
+            "type": "status",
+            # False = plus aucun paquet du jeu n'arrive (jeu ferme, Data Out
+            # coupe). Des paquets qui arrivent sans rien faire varier (menu,
+            # voiture a l'arret) restent "receiving": true.
+            "receiving": inactif is not None and inactif <= self.stale_after,
+            "idle_ms": None if inactif is None else int(inactif * 1000),
+            "clients": len(self._clients),
+        }
+        if self.status_factory is not None:
+            try:
+                etat.update(self.status_factory())
+            except Exception:  # noqa: BLE001 - un etat degrade vaut mieux que rien
+                pass
+        return etat
 
     async def _handle_client(self, connection) -> None:
         self._clients.add(connection)
@@ -188,7 +241,12 @@ class TelemetryWebSocketServer:
                      # Le client DOIT fusionner les trames partielles quand
                      # ceci vaut true ; les trames completes portent "full".
                      "differential": self.differential,
-                     "resync_seconds": self.resync_seconds}
+                     "resync_seconds": self.resync_seconds,
+                     "status_interval": self.status_interval,
+                     # Le client peut restreindre ce qu'il recoit en envoyant
+                     # {"subscribe": ["speed", "gear"]} ; {"subscribe": "*"}
+                     # revient a tout recevoir.
+                     "subscribe_supported": True}
             if self.hello_factory is not None:
                 try:
                     hello.update(self.hello_factory())
@@ -204,13 +262,43 @@ class TelemetryWebSocketServer:
             if snapshot is not None:
                 await connection.send(snapshot)
 
-            # Liaison unidirectionnelle ensuite : on ne lit rien du client.
-            await connection.wait_closed()
+            # Puis on ecoute les commandes du client (abonnement).
+            async for brut in connection:
+                await self._handle_command(connection, brut)
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
             self._clients.discard(connection)
             self._pending.pop(connection, None)
+            self._subscriptions.pop(connection, None)
+
+    async def _handle_command(self, connection, brut) -> None:
+        """Traite une commande client. Tout ce qui n'est pas reconnu est ignore."""
+        try:
+            commande = json.loads(brut)
+        except (TypeError, ValueError):
+            return
+        if not isinstance(commande, dict) or "subscribe" not in commande:
+            return
+
+        demande = commande["subscribe"]
+        if demande is None or demande == "*":
+            self._subscriptions.pop(connection, None)
+            retenus = None
+        elif isinstance(demande, list):
+            self._subscriptions[connection] = frozenset(
+                str(nom) for nom in demande if isinstance(nom, (str, int, float)))
+            retenus = sorted(self._subscriptions[connection])
+        else:
+            return
+
+        await connection.send(json.dumps(
+            {"type": "subscribed", "channels": retenus}, separators=(",", ":")))
+        # Etat complet filtre : le client a besoin d'une base immediate sur
+        # laquelle appliquer les trames partielles suivantes.
+        snapshot = self._full_state_message(self._subscriptions.get(connection))
+        if snapshot is not None:
+            await connection.send(snapshot)
 
     # -- diffusion --------------------------------------------------------
 
@@ -225,6 +313,11 @@ class TelemetryWebSocketServer:
         second cas elle n'est appelee que si la trame part reellement, ce qui
         evite de construire une charge utile destinee a etre jetee.
         """
+        # Horodate AVANT toute sortie anticipee : c'est ce qui permet a la
+        # trame d'etat de distinguer "plus aucun paquet n'arrive" de "des
+        # paquets arrivent mais rien ne change".
+        self._last_publish = time.monotonic()
+
         if self._loop is None or not self._clients:
             return False
 
@@ -267,10 +360,25 @@ class TelemetryWebSocketServer:
             self.dropped_count += 1
             return False
 
-        self._loop.call_soon_threadsafe(self._broadcast, message)
+        self._loop.call_soon_threadsafe(self._broadcast, out, message)
         return True
 
-    def _full_state_message(self) -> str | None:
+    @staticmethod
+    def _filtre(payload: dict, abonnement) -> dict | None:
+        """Restreint une trame aux canaux demandes par un client.
+
+        Renvoie None s'il ne reste aucune donnee : inutile de reveiller un
+        client pour une trame qui ne le concerne pas.
+        """
+        if abonnement is None:
+            return payload
+        garde = {k: v for k, v in payload.items()
+                 if k in abonnement or k in ("type", "full")}
+        if not any(k not in ("type", "full") for k in garde):
+            return None
+        return garde
+
+    def _full_state_message(self, abonnement=None) -> str | None:
         """Etat complet courant, pour amorcer un client qui vient d'arriver."""
         with self._state_lock:
             if not self._state:
@@ -278,15 +386,37 @@ class TelemetryWebSocketServer:
             snapshot = dict(self._state)
         snapshot["type"] = "telemetry"
         snapshot["full"] = True
+        filtre = self._filtre(snapshot, abonnement)
+        if filtre is None:
+            return None
         try:
-            return json.dumps(snapshot, separators=(",", ":"), allow_nan=False)
+            return json.dumps(filtre, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError):
             return None
 
-    def _broadcast(self, message: str) -> None:
+    def _broadcast(self, payload: dict, message: str) -> None:
         """Appele dans la boucle asyncio : `send()` est une coroutine,
-        il faut donc planifier une tache par client."""
+        il faut donc planifier une tache par client.
+
+        `message` est la version deja serialisee, reutilisee telle quelle pour
+        les clients sans abonnement — le cas courant. Les autres exigent une
+        serialisation propre, ce qui reste rentable puisque leur charge utile
+        est plus petite.
+        """
         for connection in list(self._clients):
+            abonnement = self._subscriptions.get(connection)
+            if abonnement is None:
+                propre = message
+            else:
+                filtre = self._filtre(payload, abonnement)
+                if filtre is None:
+                    continue  # rien pour ce client dans cette trame
+                try:
+                    propre = json.dumps(filtre, separators=(",", ":"), allow_nan=False)
+                except (TypeError, ValueError):
+                    self.dropped_count += 1
+                    continue
+
             previous = self._pending.get(connection)
             if previous is not None and not previous.done():
                 # Client en retard (OBS reduit, Wi-Fi congestionne) : on
@@ -294,7 +424,7 @@ class TelemetryWebSocketServer:
                 # taches et de lui servir un arriere perime.
                 self.dropped_count += 1
                 continue
-            task = asyncio.create_task(self._safe_send(connection, message))
+            task = asyncio.create_task(self._safe_send(connection, propre))
             # Reference forte : une tache seulement referencee par la boucle
             # peut etre ramassee par le GC en cours d'execution.
             self._pending[connection] = task

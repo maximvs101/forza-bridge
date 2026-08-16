@@ -39,6 +39,7 @@
   .brake > i { background: #f87171; }
   .status { font-size: 12px; opacity: .6; }
   .status.err { color: #f87171; opacity: 1; }
+  .status.stale { color: #fbbf24; opacity: 1; }
 </style>
 </head>
 <body>
@@ -76,7 +77,9 @@ const PORT = params.get("port") || location.port || "8765";
 const el = (id) => document.getElementById(id);
 const status = el("status");
 let rateHz = null;
-let channelCount = 0;
+let channelCount = 0;     // canaux effectivement recus
+let totalChannels = 0;    // canaux disponibles, annonces a l'accueil
+let mode = "";
 
 // Etat accumule : le pont n'envoie que les champs qui ont change (mode
 // differentiel annonce dans le message d'accueil), plus un etat complet
@@ -84,6 +87,8 @@ let channelCount = 0;
 let state = {};
 let dirty = false;
 let statusText = "Connexion...";
+let receiving = null;      // le jeu envoie-t-il encore des paquets ?
+let lastStatus = null;     // date de la derniere trame d'etat recue
 
 function pct(value, max) {
   if (!max) return 0;
@@ -114,10 +119,32 @@ function connect() {
     // Message d'accueil : schema des canaux, unites et cadence.
     if (d.type === "hello") {
       rateHz = d.rate_hz;
-      channelCount = (d.channels || []).length;
-      const mode = d.differential ? "differentiel" : "complet";
-      statusText = `Connecte — ${channelCount} canaux a ${rateHz} Hz (${mode})`;
+      totalChannels = (d.channels || []).length;
+      channelCount = totalChannels;
+      mode = d.differential ? "differentiel" : "complet";
       if (d.car_name) state.car_name = d.car_name;
+      // Cet overlay n'affiche que six valeurs : inutile d'en recevoir 88.
+      if (d.subscribe_supported) {
+        ws.send(JSON.stringify({ subscribe: [
+          "speed", "gear", "current_engine_rpm", "engine_max_rpm", "accel", "brake"
+        ]}));
+      }
+      dirty = true;
+      return;
+    }
+
+    if (d.type === "subscribed") {
+      channelCount = d.channels ? d.channels.length : totalChannels;
+      dirty = true;
+      return;
+    }
+
+    // Trame d'etat periodique : sert aussi de battement de coeur. Son absence
+    // prolongee signifie que le pont lui-meme s'est arrete.
+    if (d.type === "status") {
+      lastStatus = performance.now();
+      receiving = d.receiving;
+      if (d.car_name && d.car_name !== "-") state.car_name = d.car_name;
       dirty = true;
       return;
     }
@@ -151,10 +178,28 @@ function paint() {
   // accel/brake sont des octets 0-255 dans la telemetrie Forza
   if (d.accel !== undefined) el("accel").style.width = pct(d.accel, 255) + "%";
   if (d.brake !== undefined) el("brake").style.width = pct(d.brake, 255) + "%";
-  status.textContent = statusText;
+
+  status.classList.remove("stale");
+  if (receiving === false) {
+    status.textContent = "Jeu a l'arret — aucun paquet recu";
+    status.classList.add("stale");
+  } else if (rateHz !== null) {
+    status.textContent =
+      `Connecte — ${channelCount}/${totalChannels} canaux a ${rateHz} Hz (${mode})`;
+  } else {
+    status.textContent = statusText;
+  }
 }
 
 function frame() {
+  // Absence prolongee de trame d'etat = le pont ne repond plus, ce qu'un
+  // flux simplement silencieux ne permettrait pas de distinguer.
+  if (lastStatus !== null && performance.now() - lastStatus > 4000 && receiving !== null) {
+    receiving = false;
+    statusText = "Pont injoignable";
+    lastStatus = performance.now();
+    dirty = true;
+  }
   if (dirty) {
     dirty = false;
     paint();
