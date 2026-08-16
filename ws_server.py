@@ -108,10 +108,13 @@ class TelemetryWebSocketServer:
         self._state: dict = {}
         self._state_lock = threading.Lock()
         self._next_full = 0.0
-        self._last_publish = 0.0
+        self._last_activity = 0.0
         # connexion -> ensemble de canaux, ou None pour "tout"
         self._subscriptions: dict = {}
-        self._status_tasks: set = set()
+        # Envois d'etat suivis separement des envois de telemetrie : les deux
+        # flux ne doivent pas se bloquer l'un l'autre, mais chacun doit rester
+        # borne pour un client lent.
+        self._status_pending: dict = {}
         # Fabrique du message d'accueil, fournie par le pont (seul a connaitre
         # les canaux reellement emis). Facultative : sans elle, un accueil
         # minimal est envoye quand meme.
@@ -203,19 +206,52 @@ class TelemetryWebSocketServer:
         """
         while True:
             await asyncio.sleep(self.status_interval)
-            if not self._clients:
-                continue
-            message = json.dumps(self._status_payload(), separators=(",", ":"))
-            for connection in list(self._clients):
-                tache = asyncio.create_task(self._safe_send(connection, message))
-                # Reference forte : une tache seulement referencee par la
-                # boucle peut etre ramassee par le GC en cours d'execution.
-                self._status_tasks.add(tache)
-                tache.add_done_callback(self._status_tasks.discard)
+            # Rien ici ne doit pouvoir tuer la boucle : personne n'attend cette
+            # tache, une exception arreterait le battement pour toute la duree
+            # de vie du serveur, en silence.
+            try:
+                if not self._clients:
+                    continue
+                message = self._status_message()
+                for connection in list(self._clients):
+                    self._planifie(connection, message, self._status_pending)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                self.dropped_count += 1
 
-    def _status_payload(self) -> dict:
-        inactif = time.monotonic() - self._last_publish if self._last_publish else None
-        etat = {
+    def _status_message(self) -> str:
+        """Trame d'etat serialisee, avec repli sur l'etat minimal.
+
+        Un complement non serialisable ne doit pas priver le client de
+        battement de coeur : dans ce cas on emet l'etat du serveur seul.
+        """
+        base = self._status_base()
+        etat = dict(base)
+        if self.status_factory is not None:
+            try:
+                etat.update(self.status_factory())
+            except Exception:  # noqa: BLE001 - un etat degrade vaut mieux que rien
+                pass
+        try:
+            return json.dumps(_json_safe(etat), separators=(",", ":"), allow_nan=False)
+        except (TypeError, ValueError):
+            self.dropped_count += 1
+            return json.dumps(base, separators=(",", ":"))
+
+    def note_activity(self) -> None:
+        """Signale qu'un paquet du jeu vient d'arriver.
+
+        A appeler pour CHAQUE paquet recu, meme s'il est ensuite filtre
+        (option "seulement en course") ou qu'il ne change rien : sans cela la
+        trame d'etat annoncerait un flux mort alors que le jeu emet.
+        """
+        self._last_activity = time.monotonic()
+
+    def _status_base(self) -> dict:
+        """Etat connu du serveur seul, toujours serialisable."""
+        inactif = time.monotonic() - self._last_activity if self._last_activity else None
+        return {
             "type": "status",
             # False = plus aucun paquet du jeu n'arrive (jeu ferme, Data Out
             # coupe). Des paquets qui arrivent sans rien faire varier (menu,
@@ -224,12 +260,6 @@ class TelemetryWebSocketServer:
             "idle_ms": None if inactif is None else int(inactif * 1000),
             "clients": len(self._clients),
         }
-        if self.status_factory is not None:
-            try:
-                etat.update(self.status_factory())
-            except Exception:  # noqa: BLE001 - un etat degrade vaut mieux que rien
-                pass
-        return etat
 
     async def _handle_client(self, connection) -> None:
         self._clients.add(connection)
@@ -270,6 +300,7 @@ class TelemetryWebSocketServer:
         finally:
             self._clients.discard(connection)
             self._pending.pop(connection, None)
+            self._status_pending.pop(connection, None)
             self._subscriptions.pop(connection, None)
 
     async def _handle_command(self, connection, brut) -> None:
@@ -313,10 +344,11 @@ class TelemetryWebSocketServer:
         second cas elle n'est appelee que si la trame part reellement, ce qui
         evite de construire une charge utile destinee a etre jetee.
         """
-        # Horodate AVANT toute sortie anticipee : c'est ce qui permet a la
-        # trame d'etat de distinguer "plus aucun paquet n'arrive" de "des
-        # paquets arrivent mais rien ne change".
-        self._last_publish = time.monotonic()
+        # Avant toute sortie anticipee : distingue "plus aucun paquet
+        # n'arrive" de "des paquets arrivent mais rien ne change". Le pont
+        # appelle en plus note_activity() pour les paquets qu'il filtre avant
+        # d'arriver jusqu'ici.
+        self.note_activity()
 
         if self._loop is None or not self._clients:
             return False
@@ -417,25 +449,31 @@ class TelemetryWebSocketServer:
                     self.dropped_count += 1
                     continue
 
-            previous = self._pending.get(connection)
-            if previous is not None and not previous.done():
-                # Client en retard (OBS reduit, Wi-Fi congestionne) : on
-                # abandonne la trame plutot que d'empiler indefiniment des
-                # taches et de lui servir un arriere perime.
-                self.dropped_count += 1
-                continue
-            task = asyncio.create_task(self._safe_send(connection, propre))
-            # Reference forte : une tache seulement referencee par la boucle
-            # peut etre ramassee par le GC en cours d'execution.
-            self._pending[connection] = task
-            task.add_done_callback(
-                lambda done, conn=connection: self._forget(conn, done)
-            )
+            self._planifie(connection, propre, self._pending)
         self.sent_count += 1
 
-    def _forget(self, connection, task) -> None:
-        if self._pending.get(connection) is task:
-            self._pending.pop(connection, None)
+    def _planifie(self, connection, message: str, suivi: dict) -> None:
+        """Planifie un envoi, en abandonnant la trame si le precedent traine.
+
+        Client en retard (OBS reduit, Wi-Fi congestionne) : empiler les taches
+        ferait croitre la memoire sans borne et lui servirait un arriere
+        perime. `suivi` garde aussi une reference forte sur la tache, sans
+        quoi le GC pourrait la ramasser en cours d'execution.
+        """
+        precedente = suivi.get(connection)
+        if precedente is not None and not precedente.done():
+            self.dropped_count += 1
+            return
+        tache = asyncio.create_task(self._safe_send(connection, message))
+        suivi[connection] = tache
+        tache.add_done_callback(
+            lambda done, conn=connection: self._oublie(suivi, conn, done)
+        )
+
+    @staticmethod
+    def _oublie(suivi: dict, connection, tache) -> None:
+        if suivi.get(connection) is tache:
+            suivi.pop(connection, None)
 
     async def _safe_send(self, connection, message: str) -> None:
         try:

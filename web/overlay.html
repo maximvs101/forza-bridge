@@ -89,6 +89,9 @@ let dirty = false;
 let statusText = "Connexion...";
 let receiving = null;      // le jeu envoie-t-il encore des paquets ?
 let lastStatus = null;     // date de la derniere trame d'etat recue
+let connected = false;     // liaison WebSocket etablie ?
+let bridgeAlive = true;    // des trames d'etat arrivent-elles encore ?
+let statusInterval = 1;    // periode annoncee par le serveur, en secondes
 
 function pct(value, max) {
   if (!max) return 0;
@@ -99,9 +102,10 @@ function connect() {
   const ws = new WebSocket(`ws://${HOST}:${PORT}`);
 
   ws.onopen = () => {
+    connected = true;
+    bridgeAlive = true;
     statusText = `Connecte a ws://${HOST}:${PORT} — attente de l'accueil`;
     dirty = true;
-    status.classList.remove("err");
   };
 
   // Reception : uniquement decoder et fusionner. Aucune ecriture dans le DOM
@@ -119,6 +123,7 @@ function connect() {
     // Message d'accueil : schema des canaux, unites et cadence.
     if (d.type === "hello") {
       rateHz = d.rate_hz;
+      if (d.status_interval) statusInterval = d.status_interval;
       totalChannels = (d.channels || []).length;
       channelCount = totalChannels;
       mode = d.differential ? "differentiel" : "complet";
@@ -143,6 +148,7 @@ function connect() {
     // prolongee signifie que le pont lui-meme s'est arrete.
     if (d.type === "status") {
       lastStatus = performance.now();
+      bridgeAlive = true;
       receiving = d.receiving;
       if (d.car_name && d.car_name !== "-") state.car_name = d.car_name;
       dirty = true;
@@ -158,8 +164,8 @@ function connect() {
   };
 
   ws.onclose = () => {
+    connected = false;
     statusText = "Deconnecte — nouvelle tentative dans 2 s";
-    status.classList.add("err");
     dirty = true;
     setTimeout(connect, 2000);
   };
@@ -179,8 +185,17 @@ function paint() {
   if (d.accel !== undefined) el("accel").style.width = pct(d.accel, 255) + "%";
   if (d.brake !== undefined) el("brake").style.width = pct(d.brake, 255) + "%";
 
-  status.classList.remove("stale");
-  if (receiving === false) {
+  // Du plus grave au plus benin : liaison coupee, puis pont muet, puis jeu
+  // arrete, puis fonctionnement normal. Tester le flux avant la liaison
+  // rendait "Deconnecte" et "Pont injoignable" inatteignables.
+  status.classList.remove("stale", "err");
+  if (!connected) {
+    status.textContent = statusText;
+    status.classList.add("err");
+  } else if (!bridgeAlive) {
+    status.textContent = "Pont injoignable — aucune trame d'etat";
+    status.classList.add("err");
+  } else if (receiving === false) {
     status.textContent = "Jeu a l'arret — aucun paquet recu";
     status.classList.add("stale");
   } else if (rateHz !== null) {
@@ -194,10 +209,9 @@ function paint() {
 function frame() {
   // Absence prolongee de trame d'etat = le pont ne repond plus, ce qu'un
   // flux simplement silencieux ne permettrait pas de distinguer.
-  if (lastStatus !== null && performance.now() - lastStatus > 4000 && receiving !== null) {
-    receiving = false;
-    statusText = "Pont injoignable";
-    lastStatus = performance.now();
+  const limite = Math.max(3000, statusInterval * 3000);
+  if (bridgeAlive && lastStatus !== null && performance.now() - lastStatus > limite) {
+    bridgeAlive = false;
     dirty = true;
   }
   if (dirty) {

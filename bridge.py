@@ -145,6 +145,13 @@ class Bridge(threading.Thread):
             frame = parse(packet)
             if frame is None:
                 continue
+
+            # Signale l'activite AVANT le filtre "seulement en course" : sinon,
+            # en menu, la trame d'etat annoncerait un flux mort alors que le
+            # jeu emet normalement.
+            if self.ws_server is not None:
+                self.ws_server.note_activity()
+
             if self.only_racing and not frame.is_race_on:
                 continue
 
