@@ -24,13 +24,22 @@ localhost (la politique de meme origine ne s'y applique pas) : passer
 
 Chaque message est un objet JSON : {"speed": 42.1, "gear": 3, ...}
 
-Commandes acceptees d'un client (JSON) :
+Reglages par client, deux voies equivalentes.
+
+Dans l'URL de connexion, lus avant la premiere trame :
+  ws://hote:port/?full=1
+  ws://hote:port/?channels=speed,gear&full=1
+
+Ou par commande JSON envoyee ensuite :
   {"subscribe": ["speed", "gear"]}  restreint les canaux recus
   {"subscribe": "*"}                revient a tout recevoir
   {"full": true}                    etat complet a chaque trame, sans fusion
-Les deux peuvent etre combinees. `full` sert aux consommateurs qui traitent
-chaque message isolement (cables.gl et assimiles), ou un champ inchange
-arriverait "undefined" en mode differentiel.
+
+`full` sert aux consommateurs qui traitent chaque message isolement
+(cables.gl et assimiles), ou un champ inchange arriverait "undefined" en mode
+differentiel. PREFERER L'URL pour ces clients-la : dans cables, l'op
+WebSocket publie son port `Connected` avant son port `Connection`, si bien
+qu'un envoi declenche par `Connected` part sans connexion et se perd.
 """
 
 from __future__ import annotations
@@ -40,6 +49,7 @@ import json
 import math
 import threading
 import time
+from urllib.parse import parse_qs, urlparse
 
 import websockets
 from websockets.asyncio.server import serve
@@ -274,8 +284,35 @@ class TelemetryWebSocketServer:
             "clients": len(self._clients),
         }
 
+    def _applique_url(self, connection) -> None:
+        """Lit les reglages passes dans l'URL de connexion.
+
+            ws://hote:port/?full=1&channels=speed,gear
+
+        Indispensable pour les clients qui ne savent pas envoyer de commande
+        au bon moment. Dans cables.gl par exemple, l'op WebSocket publie son
+        port `Connected` AVANT son port `Connection` : un envoi declenche par
+        `Connected` part alors que la connexion n'est pas encore transmise,
+        et se perd en silence. L'URL, elle, est lue avant toute trame.
+        """
+        requete = getattr(connection, "request", None)
+        if requete is None or not getattr(requete, "path", None):
+            return
+        parametres = parse_qs(urlparse(requete.path).query)
+
+        plein = parametres.get("full", [None])[0]
+        if plein is not None and plein.lower() not in ("0", "false", "no", ""):
+            self._full_frames[connection] = True
+
+        canaux = parametres.get("channels", [None])[0]
+        if canaux:
+            demandes = [nom.strip() for nom in canaux.split(",") if nom.strip()]
+            if demandes and demandes != ["*"]:
+                self._subscriptions[connection] = frozenset(demandes)
+
     async def _handle_client(self, connection) -> None:
         self._clients.add(connection)
+        self._applique_url(connection)
         try:
             # Message d'accueil : schema, unites et cadence, pour qu'un client
             # n'ait pas a coder en dur la liste des canaux.
@@ -297,13 +334,26 @@ class TelemetryWebSocketServer:
                     hello.update(self.hello_factory())
                 except Exception:  # noqa: BLE001 - un accueil degrade vaut mieux que rien
                     pass
+
+            # L'accueil doit refleter les reglages deja appliques depuis l'URL,
+            # sinon il annoncerait des canaux que ce client ne recevra pas.
+            abonnement = self._subscriptions.get(connection)
+            hello["full"] = bool(self._full_frames.get(connection))
+            if abonnement is not None:
+                hello["channels"] = sorted(abonnement)
+                if isinstance(hello.get("units"), dict):
+                    hello["units"] = {n: u for n, u in hello["units"].items()
+                                      if n in abonnement}
+                if isinstance(hello.get("categories"), dict):
+                    hello["categories"] = {n: c for n, c in hello["categories"].items()
+                                           if n in abonnement}
             await connection.send(json.dumps(hello, separators=(",", ":")))
 
             # Puis l'etat complet, immediatement : sans cela un client qui se
             # connecte a l'arret (menu, voiture immobile) reste vide jusqu'a la
             # reprise du flux, et en differentiel il lui manquerait la base sur
             # laquelle appliquer les trames suivantes.
-            snapshot = self._full_state_message()
+            snapshot = self._full_state_message(abonnement)
             if snapshot is not None:
                 await connection.send(snapshot)
 

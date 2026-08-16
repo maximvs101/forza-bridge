@@ -1,0 +1,399 @@
+{
+    "_id": "ffef6e4e40a6bd625675fb76",
+    "shortId": "UiC5xo",
+    "name": "forza_telemetrie",
+    "description": "",
+    "userId": "6a81ef985d6728883499a313",
+    "cachedUsername": "",
+    "created": 1786902104976,
+    "updated": 1786902104976,
+    "visibility": "private",
+    "ops": [
+        {
+            "opId": "5a681c35-78ce-4cb3-9858-bc79c34c6819",
+            "id": "oslamjm8w",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -600,
+                    "y": 0
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Title",
+                    "value": "Forza"
+                }
+            ],
+            "portsOut": [
+                {
+                    "name": "childs",
+                    "links": [
+                        {
+                            "portIn": "link",
+                            "portOut": "childs",
+                            "objIn": "x6ec7lqyo",
+                            "objOut": "oslamjm8w"
+                        },
+                        {
+                            "portIn": "link",
+                            "portOut": "childs",
+                            "objIn": "5w4vrsn0s",
+                            "objOut": "oslamjm8w"
+                        },
+                        {
+                            "portIn": "link",
+                            "portOut": "childs",
+                            "objIn": "jzvy4t64a",
+                            "objOut": "oslamjm8w"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "opId": "e747dc72-8214-41ca-9aae-9041f20dd6ac",
+            "id": "yz22vi8jx",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -1100,
+                    "y": 0
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "URL",
+                    "value": "ws://localhost:8765/?full=1"
+                }
+            ],
+            "portsOut": [
+                {
+                    "name": "Result",
+                    "links": [
+                        {
+                            "portIn": "data",
+                            "portOut": "Result",
+                            "objIn": "59a19b0jt",
+                            "objOut": "yz22vi8jx"
+                        },
+                        {
+                            "portIn": "Data",
+                            "portOut": "Result",
+                            "objIn": "x894lh0ot",
+                            "objOut": "yz22vi8jx"
+                        },
+                        {
+                            "portIn": "Data",
+                            "portOut": "Result",
+                            "objIn": "14lef0mzk",
+                            "objOut": "yz22vi8jx"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "opId": "c04a204d-cd52-401f-80c9-02da396ed676",
+            "id": "59a19b0jt",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -1100,
+                    "y": 180
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Key",
+                    "value": "car_name"
+                }
+            ],
+            "portsOut": [
+                {
+                    "name": "Result",
+                    "links": [
+                        {
+                            "portIn": "Value",
+                            "portOut": "Result",
+                            "objIn": "x6ec7lqyo",
+                            "objOut": "59a19b0jt"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "opId": "3dd9927e-0d34-4442-8a8a-0ab843aee6e3",
+            "id": "x6ec7lqyo",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -600,
+                    "y": 180
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Text",
+                    "value": "Vehicule"
+                }
+            ]
+        },
+        {
+            "opId": "a7335e79-046e-40da-9e9c-db779b0a5e53",
+            "id": "x894lh0ot",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -1100,
+                    "y": 380
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Key",
+                    "value": "speed"
+                }
+            ],
+            "portsOut": [
+                {
+                    "name": "Result",
+                    "links": [
+                        {
+                            "portIn": "number1",
+                            "portOut": "Result",
+                            "objIn": "d6eplr7ip",
+                            "objOut": "x894lh0ot"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "opId": "1bbdae06-fbb2-489b-9bcc-36c9d65bd441",
+            "id": "d6eplr7ip",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -1100,
+                    "y": 440
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "number2",
+                    "value": 3.6
+                }
+            ],
+            "portsOut": [
+                {
+                    "name": "result",
+                    "links": [
+                        {
+                            "portIn": "Number",
+                            "portOut": "result",
+                            "objIn": "fvxzoap2d",
+                            "objOut": "d6eplr7ip"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "opId": "5c6d375a-82db-4366-8013-93f56b4061a9",
+            "id": "fvxzoap2d",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -1100,
+                    "y": 500
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Decimal Places",
+                    "value": 0
+                }
+            ],
+            "portsOut": [
+                {
+                    "name": "Result",
+                    "links": [
+                        {
+                            "portIn": "Value",
+                            "portOut": "Result",
+                            "objIn": "5w4vrsn0s",
+                            "objOut": "fvxzoap2d"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "opId": "3dd9927e-0d34-4442-8a8a-0ab843aee6e3",
+            "id": "5w4vrsn0s",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -600,
+                    "y": 380
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Text",
+                    "value": "Vitesse (km/h)"
+                }
+            ]
+        },
+        {
+            "opId": "a7335e79-046e-40da-9e9c-db779b0a5e53",
+            "id": "14lef0mzk",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -1100,
+                    "y": 580
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Key",
+                    "value": "current_engine_rpm"
+                }
+            ],
+            "portsOut": [
+                {
+                    "name": "Result",
+                    "links": [
+                        {
+                            "portIn": "Number",
+                            "portOut": "Result",
+                            "objIn": "qcmiu7upg",
+                            "objOut": "14lef0mzk"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "opId": "5c6d375a-82db-4366-8013-93f56b4061a9",
+            "id": "qcmiu7upg",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -1100,
+                    "y": 700
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Decimal Places",
+                    "value": 0
+                }
+            ],
+            "portsOut": [
+                {
+                    "name": "Result",
+                    "links": [
+                        {
+                            "portIn": "Value",
+                            "portOut": "Result",
+                            "objIn": "jzvy4t64a",
+                            "objOut": "qcmiu7upg"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "opId": "3dd9927e-0d34-4442-8a8a-0ab843aee6e3",
+            "id": "jzvy4t64a",
+            "attribs": {},
+            "uiAttribs": {
+                "translate": {
+                    "x": -600,
+                    "y": 580
+                }
+            },
+            "portsIn": [
+                {
+                    "name": "Text",
+                    "value": "Regime (tr/min)"
+                }
+            ]
+        }
+    ],
+    "settings": {
+        "licence": "none"
+    },
+    "userList": [
+        {
+            "username": "",
+            "_id": "6a81ef985d6728883499a313",
+            "profile_theme": "dark",
+            "isStaff": false,
+            "usernameLowercase": "",
+            "isAdmin": false,
+            "theme": "dark",
+            "created": 1786900376554
+        }
+    ],
+    "teams": [],
+    "log": [],
+    "ui": {
+        "viewBox": {},
+        "renderer": {
+            "w": 640,
+            "h": 320,
+            "s": 1
+        },
+        "timeline": {},
+        "texPreview": {},
+        "bookmarks": []
+    },
+    "summary": {
+        "title": "forza_telemetrie"
+    },
+    "buildInfo": {
+        "updateWarning": false,
+        "core": {
+            "timestamp": 1785918299022,
+            "created": "2026-08-05T08:24:59.022Z",
+            "git": {
+                "branch": "develop",
+                "commit": "194a7946e3d2be512082e253bde7909e8003e75b",
+                "date": "1785746636",
+                "message": "node 24"
+            }
+        },
+        "ui": {
+            "timestamp": 1785918325109,
+            "created": "2026-08-05T08:25:25.109Z",
+            "git": {
+                "branch": "develop",
+                "commit": "a2c70265a7027c3b7afabec66634bb548564f52c",
+                "date": "1785917771",
+                "message": "stuff"
+            }
+        },
+        "api": {
+            "timestamp": 1785918350613,
+            "created": "2026-08-05T08:25:50.613Z",
+            "git": {
+                "branch": "develop",
+                "commit": "c61ea74701fe2b6133b596c86835cc98ada140ad",
+                "date": "1785916260",
+                "message": "reset zoom - cables-gl/cables/issues/8437"
+            },
+            "platform": {
+                "os": ":win",
+                "npm": "11.16.0",
+                "node": "24.18.1"
+            },
+            "version": "0.11.1"
+        }
+    },
+    "opsHash": "7b4ff2f4e3ada88bf643643a2d0f7254e8149a65"
+}
