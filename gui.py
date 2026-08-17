@@ -66,6 +66,8 @@ class BridgeGUI:
         self.ws_server: TelemetryWebSocketServer | None = None
         self.row_by_channel: dict[str, str] = {}
         self.tray: tray.TrayIcon | None = None
+        self._etat_courant: str | None = None
+        self._refresh_id: str | None = None
         self._quitting = False
         self._last_speed = 0.0
 
@@ -211,8 +213,37 @@ class BridgeGUI:
                 self.row_by_channel[name] = row_id
 
     def _build_status_bar(self) -> None:
+        frame = ttk.Frame(self.root)
+        frame.pack(fill="x", padx=8, pady=(0, 6))
+
+        # Pastille de couleur, identique a celle de la barre d'etat systeme :
+        # les deux indicateurs sont pilotes par le meme calcul d'etat, donc
+        # ils ne peuvent pas se contredire.
+        try:
+            fond = ttk.Style().lookup("TFrame", "background") or None
+        except tk.TclError:
+            fond = None
+        self.state_canvas = tk.Canvas(frame, width=16, height=16, highlightthickness=0,
+                                      borderwidth=0, **({"bg": fond} if fond else {}))
+        self.state_dot = self.state_canvas.create_oval(3, 3, 14, 14, outline="")
+        self.state_canvas.pack(side="left", padx=(2, 6))
+
+        self.state_var = tk.StringVar()
+        ttk.Label(frame, textvariable=self.state_var,
+                  font=("Segoe UI", 9, "bold")).pack(side="left")
+
         self.status_var = tk.StringVar(value="Arrete.")
-        ttk.Label(self.root, textvariable=self.status_var, anchor="w").pack(fill="x", padx=8, pady=(0, 6))
+        ttk.Label(frame, textvariable=self.status_var,
+                  foreground="#555").pack(side="left", padx=(12, 0))
+
+        self._set_state(tray.ARRETE)
+
+    def _set_state(self, etat: str) -> None:
+        """Met a jour la pastille et le libelle de la fenetre."""
+        r, v, b = tray.COULEURS.get(etat, tray.COULEURS[tray.ARRETE])
+        self.state_canvas.itemconfigure(self.state_dot, fill=f"#{r:02x}{v:02x}{b:02x}")
+        self.state_var.set(tray.LIBELLES.get(etat, etat))
+        self._etat_courant = etat
 
     # -- actions ----------------------------------------------------------
 
@@ -302,14 +333,17 @@ class BridgeGUI:
         self._quitting = True
         self._on_close()
 
-    def _refresh_tray(self) -> None:
-        if self.tray is None:
-            return
+    def _refresh_state(self) -> None:
+        """Calcule l'etat une fois et alimente fenetre et barre systeme."""
         vitesse = 0.0
         if self.bridge is not None:
             vitesse = self.bridge.latest_values.get("speed", 0.0) or 0.0
         etat = tray.etat_pont(self.bridge, en_mouvement=vitesse > 0.5)
-        self.tray.update(etat, self.bridge)
+
+        if etat != getattr(self, "_etat_courant", None):
+            self._set_state(etat)
+        if self.tray is not None:
+            self.tray.update(etat, self.bridge)
 
     def _apply_smoothing(self) -> None:
         """Relit le champ de lissage et l'applique, pont en marche ou non."""
@@ -438,7 +472,7 @@ class BridgeGUI:
                 message = self.bridge.error or "arret inattendu"
                 self._stop_worker()
                 self.status_var.set(f"Pont interrompu: {message}")
-                self.root.after(150, self._refresh_loop)
+                self._refresh_id = self.root.after(150, self._refresh_loop)
                 return
 
             values = self.bridge.latest_values
@@ -460,8 +494,8 @@ class BridgeGUI:
                     f"{self.ws_server.client_count} client(s))"
                 )
             self.status_var.set(status)
-        self._refresh_tray()
-        self.root.after(150, self._refresh_loop)
+        self._refresh_state()
+        self._refresh_id = self.root.after(150, self._refresh_loop)
 
     def _refresh_vehicle_info(self, values: dict[str, float]) -> None:
         if not values:
@@ -510,6 +544,9 @@ class BridgeGUI:
         if self.tray is not None:
             self.tray.stop()
             self.tray = None
+        if self._refresh_id is not None:
+            self.root.after_cancel(self._refresh_id)
+            self._refresh_id = None
         self.root.destroy()
 
 
