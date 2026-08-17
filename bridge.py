@@ -5,6 +5,10 @@ Implementation unique partagee par `main.py` (ligne de commande) et
 leur propre copie de cette boucle, qui avait deja diverge (canaux transmis,
 emission du nom de vehicule).
 
+L'OSC part vers UNE OU PLUSIEURS destinations : le meme flux peut alimenter
+simultanement un logiciel de creation visuelle, une console lumiere et un
+environnement sonore.
+
 Le seul parametre qui differe reellement entre les deux est le filtre de
 canaux : `None` = tous les champs (ligne de commande), un ensemble = la
 selection de l'interface.
@@ -16,6 +20,7 @@ import socket
 import threading
 import time
 
+from pythonosc.osc_message_builder import OscMessageBuilder
 from pythonosc.udp_client import SimpleUDPClient
 
 import car_lookup
@@ -38,9 +43,10 @@ def _osc_safe(value):
     """Evite qu'un entier non signe 32 bits change l'etiquette de type OSC.
 
     python-osc emet `,i` (int32) sous 2^31 et bascule sur `,h` (int64)
-    au-dela. L'OSC In CHOP de TouchDesigner ne decode pas `h` de facon
-    fiable : le canal cesse de se mettre a jour sans erreur. `timestamp_ms`
-    franchit ce seuil apres ~24,8 jours de fonctionnement.
+    au-dela. Tous les recepteurs ne decodent pas `h` de facon fiable — l'OSC
+    In CHOP de TouchDesigner, par exemple, laisse alors le canal cesser de se
+    mettre a jour sans erreur. `timestamp_ms` franchit ce seuil apres
+    ~24,8 jours de fonctionnement.
     Un float64 represente exactement tout entier jusqu'a 2^53.
     """
     if isinstance(value, int) and not (_INT32_MIN <= value <= _INT32_MAX):
@@ -57,12 +63,12 @@ class Bridge(threading.Thread):
     concurrente pendant l'iteration leve `RuntimeError`).
     """
 
-    def __init__(self, listen_port: int, td_host: str, td_port: int, *,
+    def __init__(self, listen_port: int, osc_targets=None, *,
                  listen_host: str = "0.0.0.0",
                  selected_channels: frozenset[str] | None = None,
                  only_racing: bool = False,
                  send_car_name: bool = True,
-                 ws_server=None, osc_client=None, derived: bool = True,
+                 ws_server=None, osc_clients=None, derived: bool = True,
                  smoothing_settings: dict[str, float] | None = None):
         super().__init__(daemon=True)
         # Canaux calcules (unites usuelles, grandeurs bornees) ajoutes aux
@@ -77,9 +83,11 @@ class Bridge(threading.Thread):
         self.only_racing = only_racing
         self.send_car_name = send_car_name
         self.ws_server = ws_server
-        # Injectable pour les tests : construire puis remplacer laissait une
+        # Injectables pour les tests : construire puis remplacer laissait une
         # socket UDP ouverte derriere soi.
-        self.osc_client = osc_client or SimpleUDPClient(td_host, td_port)
+        self.osc_targets = list(osc_targets or [("127.0.0.1", 7000)])
+        self.osc_clients = list(osc_clients) if osc_clients is not None else [
+            SimpleUDPClient(hote, port) for hote, port in self.osc_targets]
 
         self.stop_event = threading.Event()
         self.bound = threading.Event()  # arme apres la tentative de bind
@@ -207,17 +215,15 @@ class Bridge(threading.Thread):
                 self._car_name = car_lookup.describe(ordinal)
                 self.smoother.reset()
                 if self.send_car_name:
-                    # Chaine : cible un OSC In DAT, pas un OSC In CHOP.
-                    self.osc_client.send_message(
-                        f"{OSC_ADDRESS_PREFIX}/car_name", self._car_name
-                    )
+                    # Chaine de caracteres : certains recepteurs n'acceptent
+                    # que des nombres sur leur entree principale (dans
+                    # TouchDesigner par exemple, il faut un OSC In DAT).
+                    self._emet(f"{OSC_ADDRESS_PREFIX}/car_name", self._car_name)
 
             for name in names:
                 value = values.get(name)
                 if value is not None:
-                    self.osc_client.send_message(
-                        f"{OSC_ADDRESS_PREFIX}/{name}", _osc_safe(value)
-                    )
+                    self._emet(f"{OSC_ADDRESS_PREFIX}/{name}", _osc_safe(value))
 
             if self.ws_server is not None:
                 # Charge utile construite paresseusement : le serveur limite
@@ -231,6 +237,18 @@ class Bridge(threading.Thread):
             "car_name": self._car_name,
             "is_race_on": bool(self.latest_values.get("is_race_on", 0)),
         }
+
+    def _emet(self, adresse: str, valeur) -> None:
+        """Envoie un message OSC a toutes les destinations.
+
+        Le message est encode UNE seule fois : avec plusieurs destinations,
+        passer par send_message() le reconstruirait a chaque envoi.
+        """
+        constructeur = OscMessageBuilder(address=adresse)
+        constructeur.add_arg(valeur)
+        message = constructeur.build()
+        for client in self.osc_clients:
+            client.send(message)
 
     def _ws_payload(self, values: dict, names) -> dict:
         payload = {name: values[name] for name in names if name in values}

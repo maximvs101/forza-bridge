@@ -1,7 +1,8 @@
-"""Interface graphique pour la passerelle Forza Horizon -> TouchDesigner.
+"""Interface graphique de la passerelle de telemetrie Forza Horizon.
 
-Permet de configurer la connexion UDP/OSC, choisir les canaux a transmettre,
-et visualiser les valeurs recues en temps reel.
+Permet de configurer la reception UDP, les destinations OSC et le serveur
+WebSocket, de choisir les canaux a transmettre, de regler leur lissage et de
+visualiser les valeurs recues en temps reel.
 
 Lancement: python gui.py
 """
@@ -26,8 +27,7 @@ CONFIG_PATH = Path(__file__).with_name("config.json")
 def load_config() -> dict:
     default = {
         "listen_port": 5300,
-        "td_host": "127.0.0.1",
-        "td_port": 7000,
+        "osc_targets": "127.0.0.1:7000",
         "only_racing": False,
         "send_car_name": True,
         "ws_enabled": True,
@@ -43,6 +43,13 @@ def load_config() -> dict:
     if CONFIG_PATH.exists():
         try:
             saved = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            # Reprise d'une configuration anterieure, quand la destination OSC
+            # etait un couple hote/port unique nomme d'apres TouchDesigner.
+            if "osc_targets" not in saved and ("td_host" in saved or "td_port" in saved):
+                saved["osc_targets"] = (f"{saved.pop('td_host', '127.0.0.1')}"
+                                        f":{saved.pop('td_port', 7000)}")
+            saved.pop("td_host", None)
+            saved.pop("td_port", None)
             default.update(saved)
         except (json.JSONDecodeError, OSError):
             pass
@@ -59,7 +66,7 @@ def save_config(config: dict) -> None:
 class BridgeGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Passerelle Forza Horizon -> TouchDesigner")
+        self.root.title("Passerelle de telemetrie Forza Horizon")
         self.config_data = load_config()
         self.selected_channels: set[str] = set(self.config_data["selected_channels"])
         self.bridge: Bridge | None = None
@@ -73,8 +80,8 @@ class BridgeGUI:
 
         self._build_config_frame()
         self._build_vehicle_frame()
-        self._build_channel_frame()
         self._build_status_bar()
+        self._build_channel_frame()
 
         self._apply_smoothing()
         self._setup_tray()
@@ -93,13 +100,10 @@ class BridgeGUI:
         self.listen_port_var = tk.StringVar(value=str(self.config_data["listen_port"]))
         ttk.Entry(frame, textvariable=self.listen_port_var, width=8).grid(row=0, column=1, padx=4)
 
-        ttk.Label(frame, text="IP TouchDesigner:").grid(row=0, column=2, sticky="w", padx=4)
-        self.td_host_var = tk.StringVar(value=self.config_data["td_host"])
-        ttk.Entry(frame, textvariable=self.td_host_var, width=14).grid(row=0, column=3, padx=4)
-
-        ttk.Label(frame, text="Port OSC TouchDesigner:").grid(row=0, column=4, sticky="w", padx=4)
-        self.td_port_var = tk.StringVar(value=str(self.config_data["td_port"]))
-        ttk.Entry(frame, textvariable=self.td_port_var, width=8).grid(row=0, column=5, padx=4)
+        ttk.Label(frame, text="Destinations OSC:").grid(row=0, column=2, sticky="w", padx=4)
+        self.osc_targets_var = tk.StringVar(value=self.config_data["osc_targets"])
+        ttk.Entry(frame, textvariable=self.osc_targets_var, width=34).grid(
+            row=0, column=3, columnspan=3, sticky="we", padx=4)
 
         self.only_racing_var = tk.BooleanVar(value=self.config_data["only_racing"])
         ttk.Checkbutton(
@@ -109,7 +113,7 @@ class BridgeGUI:
         self.send_car_name_var = tk.BooleanVar(value=self.config_data["send_car_name"])
         ttk.Checkbutton(
             frame,
-            text="Envoyer /forza/car_name en OSC (chaine -> OSC In DAT)",
+            text="Envoyer /forza/car_name (chaine de caracteres, non numerique)",
             variable=self.send_car_name_var,
             command=self._on_send_car_name_toggled,
         ).grid(row=2, column=0, columnspan=4, sticky="w", padx=4, pady=(0, 4))
@@ -214,7 +218,9 @@ class BridgeGUI:
 
     def _build_status_bar(self) -> None:
         frame = ttk.Frame(self.root)
-        frame.pack(fill="x", padx=8, pady=(0, 6))
+        # `side="bottom"` : la barre garde sa place meme si le tableau reclame
+        # tout l'espace disponible.
+        frame.pack(side="bottom", fill="x", padx=8, pady=(0, 6))
 
         # Pastille de couleur, identique a celle de la barre d'etat systeme :
         # les deux indicateurs sont pilotes par le meme calcul d'etat, donc
@@ -391,12 +397,30 @@ class BridgeGUI:
             return None
         return value
 
+    def _read_osc_targets(self) -> list[tuple[str, int]] | None:
+        """Lit "hote:port, hote:port". None si une entree est invalide."""
+        cibles = []
+        for entree in self.osc_targets_var.get().replace(";", ",").split(","):
+            entree = entree.strip()
+            if not entree:
+                continue
+            hote, separateur, port = entree.rpartition(":")
+            if not separateur or not port.isdigit() or not (0 < int(port) <= 65535):
+                self.status_var.set(f"Destination OSC invalide : \"{entree}\" "
+                                    f"(attendu hote:port)")
+                return None
+            cibles.append((hote, int(port)))
+        if not cibles:
+            self.status_var.set("Aucune destination OSC.")
+            return None
+        return cibles
+
     def _start_worker(self) -> None:
         listen_port = self._read_port(self.listen_port_var, "Port d'ecoute Forza")
         if listen_port is None:
             return
-        td_port = self._read_port(self.td_port_var, "Port OSC TouchDesigner")
-        if td_port is None:
+        cibles = self._read_osc_targets()
+        if cibles is None:
             return
 
         if self.ws_enabled_var.get():
@@ -424,8 +448,7 @@ class BridgeGUI:
 
         self.bridge = Bridge(
             listen_port=listen_port,
-            td_host=self.td_host_var.get().strip(),
-            td_port=td_port,
+            osc_targets=cibles,
             selected_channels=frozenset(self.selected_channels),
             only_racing=self.only_racing_var.get(),
             send_car_name=self.send_car_name_var.get(),
@@ -445,7 +468,8 @@ class BridgeGUI:
             return
 
         self.start_button.configure(text="Arreter")
-        self.status_var.set(f"En ecoute sur le port {listen_port}...")
+        destinations = ", ".join(f"{h}:{p}" for h, p in cibles)
+        self.status_var.set(f"Ecoute {listen_port} -> OSC {destinations}")
 
     def _stop_ws(self) -> None:
         if self.ws_server is not None:
@@ -527,8 +551,7 @@ class BridgeGUI:
 
         self.config_data.update({
             "listen_port": as_number(self.listen_port_var, 5300),
-            "td_host": self.td_host_var.get().strip(),
-            "td_port": as_number(self.td_port_var, 7000),
+            "osc_targets": self.osc_targets_var.get().strip(),
             "only_racing": self.only_racing_var.get(),
             "send_car_name": self.send_car_name_var.get(),
             "ws_enabled": self.ws_enabled_var.get(),
@@ -552,7 +575,11 @@ class BridgeGUI:
 
 def main() -> None:
     root = tk.Tk()
-    root.geometry("720x560")
+    # Taille etablie d'apres le contenu reel : le cadre de connexion compte
+    # sept lignes et le tableau cinq colonnes. Trop juste, la fenetre tronquait
+    # les libelles et repoussait la barre d'etat hors de l'ecran.
+    root.geometry("1060x820")
+    root.minsize(940, 660)
     BridgeGUI(root)
     root.mainloop()
 

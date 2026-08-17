@@ -2,8 +2,8 @@
 
 Le jeu emet des unites brutes : vitesse en m/s, pedales en octets 0-255,
 angles en radians, temperatures en Fahrenheit. Chaque consommateur refaisait
-donc les memes conversions — l'overlay, le patch cables et le reseau
-TouchDesigner avaient chacun leur multiplication par 3,6.
+donc les memes conversions : chaque consommateur avait sa propre
+multiplication par 3,6.
 
 Ces canaux sont calcules une fois dans le pont et diffuses comme les autres :
 ils traversent l'OSC, le WebSocket, l'interface et le message d'accueil sans

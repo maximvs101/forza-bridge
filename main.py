@@ -1,13 +1,18 @@
-"""Passerelle Forza Horizon -> TouchDesigner (ligne de commande).
+"""Passerelle de telemetrie Forza Horizon (ligne de commande).
 
 Ecoute le flux "Data Out" UDP de Forza Horizon, retransmet chaque champ
-de telemetrie en OSC vers TouchDesigner (OSC In CHOP) et, si demande,
-diffuse la meme telemetrie en WebSocket pour les outils web.
+de telemetrie en OSC vers une ou plusieurs destinations, et diffuse la meme
+telemetrie en WebSocket pour les outils web.
+
+Compatible avec tout logiciel parlant OSC ou WebSocket : creation visuelle
+(TouchDesigner, cables.gl, vvvv), lumiere (QLC+, Chataigne), son
+(SuperCollider, Pure Data, Sonic Pi), overlay de diffusion.
 
 La boucle elle-meme vit dans bridge.py, partagee avec l'interface graphique.
 
 Usage:
-    python main.py --listen-port 5300 --td-host 127.0.0.1 --td-port 7000
+    python main.py
+    python main.py --osc 127.0.0.1:7000 --osc 192.168.0.50:9000
 """
 
 from __future__ import annotations
@@ -21,7 +26,7 @@ from bridge import Bridge
 from ws_server import TelemetryWebSocketServer
 
 
-def run(listen_host: str, listen_port: int, td_host: str, td_port: int,
+def run(listen_host: str, listen_port: int, osc_targets: list[tuple[str, int]],
         only_racing: bool, ws_host: str = "127.0.0.1", derived: bool = True,
         smoothing_settings=None,
         ws_port: int | None = None, ws_rate_hz: float = 60.0,
@@ -36,8 +41,7 @@ def run(listen_host: str, listen_port: int, td_host: str, td_port: int,
 
     bridge = Bridge(
         listen_port=listen_port,
-        td_host=td_host,
-        td_port=td_port,
+        osc_targets=osc_targets,
         listen_host=listen_host,
         selected_channels=None,  # tous les champs
         only_racing=only_racing,
@@ -54,7 +58,8 @@ def run(listen_host: str, listen_port: int, td_host: str, td_port: int,
         return 1
 
     print(f"Ecoute UDP Forza sur {listen_host}:{listen_port}")
-    print(f"Envoi OSC vers TouchDesigner {td_host}:{td_port} (prefixe /forza/...)")
+    destinations = ", ".join(f"{hote}:{port}" for hote, port in osc_targets)
+    print(f"Envoi OSC vers {destinations} (prefixe /forza/...)")
     if ws_server:
         portee = "reseau local" if ws_host == "0.0.0.0" else "cette machine uniquement"
         affichage = "localhost" if ws_host == "127.0.0.1" else ws_host
@@ -97,13 +102,18 @@ def run(listen_host: str, listen_port: int, td_host: str, td_port: int,
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Passerelle Forza Horizon -> TouchDesigner (UDP -> OSC/WebSocket)")
+    parser = argparse.ArgumentParser(
+        description="Passerelle de telemetrie Forza Horizon (UDP -> OSC / WebSocket)")
     parser.add_argument("--listen-host", default="0.0.0.0",
                         help="Adresse d'ecoute du flux Forza (defaut: 0.0.0.0 ; "
                              "le jeu emet depuis l'adresse reseau de la machine, pas 127.0.0.1)")
     parser.add_argument("--listen-port", type=int, default=5300, help="Port d'ecoute du flux Forza (defaut: 5300)")
-    parser.add_argument("--td-host", default="127.0.0.1", help="Adresse de TouchDesigner (defaut: 127.0.0.1)")
-    parser.add_argument("--td-port", type=int, default=7000, help="Port OSC In de TouchDesigner (defaut: 7000)")
+    parser.add_argument("--osc", action="append", metavar="HOTE:PORT", default=None,
+                        help="Destination OSC, repetable pour alimenter plusieurs "
+                             "logiciels a la fois (defaut: 127.0.0.1:7000)")
+    # Anciens noms, conserves pour ne pas casser les lancements existants.
+    parser.add_argument("--td-host", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--td-port", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--only-racing",
         action="store_true",
@@ -128,13 +138,24 @@ def main() -> None:
                              "(defaut: cette machine uniquement ; le flux contient la position du vehicule)")
     args = parser.parse_args()
 
+    cibles = []
+    for entree in (args.osc or []):
+        hote, separateur, port = entree.rpartition(":")
+        if not separateur or not port.isdigit() or not (0 < int(port) <= 65535):
+            parser.error(f"--osc attend HOTE:PORT, recu \"{entree}\"")
+        cibles.append((hote, int(port)))
+    if args.td_host is not None or args.td_port is not None:
+        cibles.append((args.td_host or "127.0.0.1", args.td_port or 7000))
+    if not cibles:
+        cibles.append(("127.0.0.1", 7000))
+
     if args.ws_port and not (0 < args.ws_port <= 65535):
         parser.error("--ws-port doit etre compris entre 1 et 65535")
     if args.ws_rate <= 0:
         parser.error("--ws-rate doit etre strictement positif")
 
     try:
-        code = run(args.listen_host, args.listen_port, args.td_host, args.td_port,
+        code = run(args.listen_host, args.listen_port, cibles,
                    args.only_racing, derived=not args.no_derived,
                    smoothing_settings=smoothing.parse_reglages(args.smooth),
                    ws_host="0.0.0.0" if args.ws_lan else "127.0.0.1",

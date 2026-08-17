@@ -2,7 +2,7 @@
 
 Regroupe les champs de forza_telemetry.py par categorie pour l'affichage,
 et definit une selection par defaut ("essentiels") pour un demarrage rapide.
-Les champs internes non documentes (horizon_unknown_*) sont exclus.
+Sert aussi a publier les unites dans le message d'accueil WebSocket.
 """
 
 from derived_channels import DERIVED_CHANNELS, DERIVED_UNITS
@@ -50,8 +50,8 @@ CATEGORIES: dict[str, list[str]] = {
     ],
     # Champs presents dans le paquet Horizon mais jamais identifies par la
     # communaute. Ils etaient auparavant absents du catalogue tout en etant
-    # emis par main.py : deux canaux arrivaient dans TouchDesigner sans
-    # figurer nulle part. Listes ici, et decoches par defaut.
+    # emis par main.py : deux canaux etaient donc diffuses sans figurer
+    # dans aucune liste. Listes ici, et decoches par defaut.
     "Non documente": [
         "horizon_unknown_1", "horizon_unknown_2",
     ],
@@ -61,8 +61,8 @@ CATEGORIES: dict[str, list[str]] = {
 RAW_CHANNELS: list[str] = [name for names in CATEGORIES.values() for name in names]
 
 # Canaux calcules par le pont (unites usuelles, grandeurs bornees). Ajoutes au
-# catalogue pour apparaitre dans l'interface, la table TouchDesigner et le
-# message d'accueil comme n'importe quel autre canal.
+# catalogue pour apparaitre dans l'interface et le message d'accueil comme
+# n'importe quel autre canal.
 CATEGORIES["Derives"] = list(DERIVED_CHANNELS)
 
 ALL_CHANNELS: list[str] = [name for names in CATEGORIES.values() for name in names]

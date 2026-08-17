@@ -77,9 +77,8 @@ class TestActiviteAvecOnlyRacing(unittest.TestCase):
         self.addCleanup(serveur.stop)
 
         port = free_port()
-        pont = Bridge(listen_port=port, td_host="127.0.0.1", td_port=free_port(),
-                      only_racing=True, ws_server=serveur,
-                      osc_client=OscRecorder())
+        pont = Bridge(listen_port=port, only_racing=True, ws_server=serveur,
+                      osc_clients=[OscRecorder()])
         pont.start()
         self.assertTrue(pont.bound.wait(5))
         self.addCleanup(lambda: (pont.stop(), pont.join(timeout=3)))

@@ -49,8 +49,8 @@ class BridgeTestCase(unittest.TestCase):
             self.bridge.join(timeout=3)
 
     def demarre(self, **kwargs) -> Bridge:
-        self.bridge = Bridge(listen_port=self.port, td_host="127.0.0.1",
-                             td_port=free_port(), osc_client=self.recorder, **kwargs)
+        self.bridge = Bridge(listen_port=self.port,
+                             osc_clients=[self.recorder], **kwargs)
         self.bridge.start()
         self.assertTrue(self.bridge.bound.wait(5), "bind jamais tente")
         self.assertIsNone(self.bridge.error)
@@ -148,8 +148,7 @@ class TestRobustesse(BridgeTestCase):
         occupant = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         occupant.bind(("0.0.0.0", self.port))
         try:
-            bridge = Bridge(listen_port=self.port, td_host="127.0.0.1",
-                            td_port=free_port(), osc_client=self.recorder)
+            bridge = Bridge(listen_port=self.port, osc_clients=[self.recorder])
             bridge.start()
             self.assertTrue(bridge.bound.wait(5), "evenement 'bound' jamais arme")
             bridge.join(timeout=3)
@@ -164,10 +163,10 @@ class TestRobustesse(BridgeTestCase):
         self.demarre(selected_channels=frozenset({"speed"}))
 
         class ClientCasse:
-            def send_message(self, *args):
+            def send(self, *args):
                 raise RuntimeError("panne simulee")
 
-        self.bridge.osc_client = ClientCasse()
+        self.bridge.osc_clients = [ClientCasse()]
         envoie(self.port, make_packet(speed=10.0))
         self.assertTrue(wait_until(lambda: not self.bridge.is_alive()))
         self.assertIn("panne simulee", self.bridge.error)

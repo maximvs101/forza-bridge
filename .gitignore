@@ -5,3 +5,9 @@ __pycache__/
 # Etat local de l'interface (ports, selection de canaux) : regenere avec les
 # valeurs par defaut au premier lancement.
 config.json
+
+# Ordinaux de vehicules rencontres et absents de la table : trace locale,
+# propre a la partie jouee.
+car_ordinals_unknown.json
+tests/_config_test.json
+tests/_inconnus_test.json

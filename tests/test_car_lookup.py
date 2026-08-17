@@ -31,6 +31,54 @@ class TestCarName(unittest.TestCase):
         self.assertGreater(car_lookup.known_count(), 600)
 
 
+class TestOrdinauxInconnus(unittest.TestCase):
+    """La table vient d'une liste communautaire figee : les voitures ajoutees
+    par les mises a jour du jeu y manquent forcement. Les retenir evite de
+    decouvrir le manque par hasard."""
+
+    def setUp(self):
+        self._sauvegarde = set(car_lookup._inconnus)
+        car_lookup._inconnus.clear()
+        self._fichier = car_lookup._UNKNOWN_PATH
+        car_lookup._UNKNOWN_PATH = self._fichier.with_name("_inconnus_test.json")
+
+    def tearDown(self):
+        if car_lookup._UNKNOWN_PATH.exists():
+            car_lookup._UNKNOWN_PATH.unlink()
+        car_lookup._UNKNOWN_PATH = self._fichier
+        car_lookup._inconnus.clear()
+        car_lookup._inconnus.update(self._sauvegarde)
+
+    def test_ordinal_inconnu_retenu(self):
+        car_lookup.describe(987001)
+        self.assertIn(987001, car_lookup.unknown_seen())
+
+    def test_ordinal_connu_non_retenu(self):
+        car_lookup.describe(3917)
+        self.assertEqual(car_lookup.unknown_seen(), [])
+
+    def test_absence_de_vehicule_non_retenue(self):
+        """En menu le jeu envoie l'ordinal 0 : ce n'est pas une voiture
+        manquante, et l'inscrire polluerait le journal."""
+        car_lookup.describe(0)
+        car_lookup.describe(None)
+        self.assertEqual(car_lookup.unknown_seen(), [])
+
+    def test_ecrit_sur_disque(self):
+        car_lookup.describe(987002)
+        import json
+        contenu = json.loads(car_lookup._UNKNOWN_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(contenu, [987002])
+
+    def test_pas_de_doublon(self):
+        for _ in range(5):
+            car_lookup.describe(987003)
+        self.assertEqual(car_lookup.unknown_seen(), [987003])
+
+    def test_rechargement_de_la_table(self):
+        self.assertEqual(car_lookup.reload_table(), car_lookup.known_count())
+
+
 class TestLibelles(unittest.TestCase):
     def test_drivetrain(self):
         self.assertEqual(car_lookup.drivetrain_label(0), "FWD")

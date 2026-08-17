@@ -18,10 +18,17 @@ Egalement disponibles ici : les libelles des enumerations `car_class` et
 from __future__ import annotations
 
 import json
+import threading
 from functools import lru_cache
 from pathlib import Path
 
 _DATA_PATH = Path(__file__).with_name("car_ordinals.json")
+# Ordinaux rencontres mais absents de la table : conserves pour pouvoir
+# completer la liste plus tard, au lieu de decouvrir le manque par hasard.
+_UNKNOWN_PATH = Path(__file__).with_name("car_ordinals_unknown.json")
+
+_inconnus: set[int] = set()
+_verrou = threading.Lock()
 
 # EDrivetrainType, tel que documente dans le format Data Out de Forza.
 DRIVETRAIN_LABELS = {0: "FWD", 1: "RWD", 2: "AWD"}
@@ -59,13 +66,52 @@ def car_name(ordinal: int | float | None) -> str | None:
 
 
 def describe(ordinal: int | float | None) -> str:
-    """Nom du vehicule, ou un libelle de repli explicite si l'ordinal est inconnu."""
+    """Nom du vehicule, ou un libelle de repli explicite si l'ordinal est inconnu.
+
+    Un ordinal inconnu est enregistre : la table vient d'une liste
+    communautaire figee, les voitures ajoutees par les mises a jour du jeu y
+    manquent forcement.
+    """
     name = car_name(ordinal)
     if name:
         return name
     if ordinal in (None, 0):
         return "-"
+    note_unknown(ordinal)
     return f"Vehicule inconnu (ordinal {int(ordinal)})"
+
+
+def note_unknown(ordinal: int | float) -> None:
+    """Retient un ordinal absent de la table, et l'ecrit sur disque.
+
+    Appele depuis le thread reseau : l'ecriture n'a lieu qu'a la premiere
+    rencontre, donc au plus une fois par vehicule inconnu.
+    """
+    try:
+        valeur = int(ordinal)
+    except (TypeError, ValueError):
+        return
+    with _verrou:
+        if valeur in _inconnus:
+            return
+        _inconnus.add(valeur)
+        contenu = sorted(_inconnus)
+    try:
+        _UNKNOWN_PATH.write_text(json.dumps(contenu, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def unknown_seen() -> list[int]:
+    """Ordinaux inconnus rencontres depuis le demarrage."""
+    with _verrou:
+        return sorted(_inconnus)
+
+
+def reload_table() -> int:
+    """Relit car_ordinals.json depuis le disque. Renvoie le nombre d'entrees."""
+    _table.cache_clear()
+    return len(_table())
 
 
 def drivetrain_label(value: int | float | None) -> str:

@@ -48,13 +48,19 @@ def wait_until(predicate, timeout: float = 5.0, interval: float = 0.02) -> bool:
 
 
 class OscRecorder:
-    """Remplace le client OSC pour capturer ce qui est reellement emis."""
+    """Remplace un client OSC pour capturer ce qui est reellement emis.
+
+    Le pont encode le message une seule fois puis appelle `send()` sur chaque
+    destination : ce faux client suit donc la meme interface.
+    """
 
     def __init__(self):
         self.messages: list[tuple[str, object]] = []
 
-    def send_message(self, address, value):
-        self.messages.append((address, value))
+    def send(self, message):
+        params = list(message.params)
+        self.messages.append((message.address,
+                              params[0] if len(params) == 1 else params))
 
     @property
     def addresses(self) -> set[str]:
