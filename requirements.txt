@@ -1,2 +1,7 @@
 python-osc>=1.9
 websockets>=13
+
+# Icone de barre d'etat systeme (gui.py). Facultatif : sans ces deux
+# paquets, l'interface reste une fenetre ordinaire.
+pystray>=0.19
+Pillow>=10

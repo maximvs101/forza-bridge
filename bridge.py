@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import socket
 import threading
+import time
 
 from pythonosc.udp_client import SimpleUDPClient
 
 import car_lookup
 import derived_channels
+import smoothing
 from channel_catalog import ALL_CHANNELS, CATEGORY_OF, UNITS
 from forza_telemetry import parse
 
@@ -60,11 +62,15 @@ class Bridge(threading.Thread):
                  selected_channels: frozenset[str] | None = None,
                  only_racing: bool = False,
                  send_car_name: bool = True,
-                 ws_server=None, osc_client=None, derived: bool = True):
+                 ws_server=None, osc_client=None, derived: bool = True,
+                 smoothing_settings: dict[str, float] | None = None):
         super().__init__(daemon=True)
         # Canaux calcules (unites usuelles, grandeurs bornees) ajoutes aux
         # canaux bruts. Voir derived_channels.py.
         self.derived = derived
+        # Lissage applique APRES les derives : on peut ainsi adoucir
+        # speed_kmh tout en gardant speed brut pour l'analyse.
+        self.smoother = smoothing.Smoother(smoothing_settings)
         self.listen_host = listen_host
         self.listen_port = listen_port
         self.selected_channels = selected_channels
@@ -102,10 +108,24 @@ class Bridge(threading.Thread):
         for name in WS_CONTEXT_FIELDS:
             if name not in names:
                 names.append(name)
+        unites = {n: UNITS[n] for n in names if n in UNITS}
+        categories = {n: CATEGORY_OF[n] for n in names if n in CATEGORY_OF}
+
+        # Les canaux lisses portent l'unite et la categorie de leur source.
+        for lisse in self.smoother.canaux_produits:
+            if lisse in names:
+                continue
+            names.append(lisse)
+            source = lisse[:-len(smoothing.SUFFIXE)]
+            if source in UNITS:
+                unites[lisse] = UNITS[source]
+            if source in CATEGORY_OF:
+                categories[lisse] = CATEGORY_OF[source]
+
         return {
             "channels": names,
-            "units": {n: UNITS[n] for n in names if n in UNITS},
-            "categories": {n: CATEGORY_OF[n] for n in names if n in CATEGORY_OF},
+            "units": unites,
+            "categories": categories,
             "car_name": self._car_name,
             "packet_count": self.packet_count,
         }
@@ -164,18 +184,28 @@ class Bridge(threading.Thread):
                 # Fusionnes aux canaux bruts : tout l'aval (OSC, WebSocket,
                 # interface, accueil) les traite sans rien de particulier.
                 values = {**values, **derived_channels.compute(values)}
+            if self.smoother.actif:
+                values = self.smoother.apply(values, time.monotonic())
             self.latest_values = values
             self.packet_count += 1
 
             # Instantane : `selected_channels` peut etre reaffecte par
             # l'interface entre deux trames.
             selected = self.selected_channels
-            names = values.keys() if selected is None else selected
+            if selected is None:
+                names = values.keys()
+            else:
+                # Les canaux lisses ne figurent pas au catalogue : les
+                # configurer vaut demande explicite, ils accompagnent donc
+                # toujours la selection.
+                lisses = self.smoother.canaux_produits
+                names = selected if not lisses else selected.union(lisses)
 
             ordinal = values.get("car_ordinal")
             if ordinal != self._last_ordinal:
                 self._last_ordinal = ordinal
                 self._car_name = car_lookup.describe(ordinal)
+                self.smoother.reset()
                 if self.send_car_name:
                     # Chaine : cible un OSC In DAT, pas un OSC In CHOP.
                     self.osc_client.send_message(

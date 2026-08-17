@@ -14,6 +14,8 @@ from pathlib import Path
 from tkinter import ttk
 
 import car_lookup
+import smoothing
+import tray
 from bridge import Bridge
 from channel_catalog import CATEGORIES, DEFAULT_SELECTION
 from ws_server import TelemetryWebSocketServer
@@ -31,6 +33,8 @@ def load_config() -> dict:
         "ws_enabled": True,
         "ws_lan": False,
         "derived": True,
+        "smoothing": "",
+        "tray": True,
         "ws_differential": True,
         "ws_port": 8765,
         "ws_rate_hz": 60,
@@ -61,13 +65,20 @@ class BridgeGUI:
         self.bridge: Bridge | None = None
         self.ws_server: TelemetryWebSocketServer | None = None
         self.row_by_channel: dict[str, str] = {}
+        self.tray: tray.TrayIcon | None = None
+        self._quitting = False
+        self._last_speed = 0.0
 
         self._build_config_frame()
         self._build_vehicle_frame()
         self._build_channel_frame()
         self._build_status_bar()
 
-        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._apply_smoothing()
+        self._setup_tray()
+        # Fermer la fenetre replie dans la barre d'etat plutot que d'arreter
+        # le pont : c'est un outil qu'on laisse tourner pendant qu'on joue.
+        self.root.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
         self._refresh_loop()
 
     # -- construction de l'interface -----------------------------------
@@ -139,6 +150,13 @@ class BridgeGUI:
             variable=self.ws_differential_var,
         ).grid(row=5, column=0, columnspan=6, sticky="w", padx=4, pady=(0, 6))
 
+        ttk.Label(frame, text="Lissage (s):").grid(row=6, column=0, sticky="w", padx=4, pady=(0, 6))
+        self.smoothing_var = tk.StringVar(value=self.config_data["smoothing"])
+        ttk.Entry(frame, textvariable=self.smoothing_var, width=52).grid(
+            row=6, column=1, columnspan=4, sticky="we", padx=4, pady=(0, 6))
+        ttk.Button(frame, text="Appliquer", command=self._apply_smoothing).grid(
+            row=6, column=5, sticky="e", padx=4, pady=(0, 6))
+
     def _build_vehicle_frame(self) -> None:
         frame = ttk.LabelFrame(self.root, text="Vehicule detecte")
         frame.pack(fill="x", padx=8, pady=(0, 6))
@@ -166,15 +184,17 @@ class BridgeGUI:
         ttk.Button(toolbar, text="Tout decocher", command=self._select_none).pack(side="left", padx=4)
         ttk.Button(toolbar, text="Selection recommandee", command=self._select_default).pack(side="left", padx=4)
 
-        columns = ("select", "category", "channel", "value")
+        columns = ("select", "category", "channel", "smooth", "value")
         self.tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="none")
         self.tree.heading("select", text="")
         self.tree.heading("category", text="Categorie")
         self.tree.heading("channel", text="Canal")
+        self.tree.heading("smooth", text="Lissage")
         self.tree.heading("value", text="Valeur")
         self.tree.column("select", width=30, anchor="center")
         self.tree.column("category", width=130, anchor="w")
-        self.tree.column("channel", width=260, anchor="w")
+        self.tree.column("channel", width=240, anchor="w")
+        self.tree.column("smooth", width=70, anchor="e")
         self.tree.column("value", width=100, anchor="e")
         self.tree.pack(fill="both", expand=True, side="left", padx=4, pady=4)
 
@@ -187,7 +207,7 @@ class BridgeGUI:
         for category, names in CATEGORIES.items():
             for name in names:
                 checked = "☑" if name in self.selected_channels else "☐"
-                row_id = self.tree.insert("", "end", values=(checked, category, name, ""))
+                row_id = self.tree.insert("", "end", values=(checked, category, name, "", ""))
                 self.row_by_channel[name] = row_id
 
     def _build_status_bar(self) -> None:
@@ -247,6 +267,73 @@ class BridgeGUI:
         """
         if self.bridge:
             self.bridge.selected_channels = frozenset(self.selected_channels)
+
+    def _setup_tray(self) -> None:
+        if not self.config_data.get("tray", True):
+            return
+        self.tray = tray.TrayIcon(
+            on_show=lambda: self.root.after(0, self._show_window),
+            on_start_stop=lambda: self.root.after(0, self._toggle_worker),
+            on_open_overlay=lambda: self.root.after(0, self._open_overlay),
+            on_quit=lambda: self.root.after(0, self._quit),
+        )
+        if not self.tray.start():
+            self.tray = None  # dependance absente : on reste une fenetre ordinaire
+
+    def _hide_to_tray(self) -> None:
+        if self.tray is None:
+            self._quit()
+            return
+        self.root.withdraw()
+
+    def _show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+
+    def _open_overlay(self) -> None:
+        import webbrowser
+        try:
+            port = int(self.ws_port_var.get())
+        except ValueError:
+            port = 8765
+        webbrowser.open(f"http://localhost:{port}/")
+
+    def _quit(self) -> None:
+        self._quitting = True
+        self._on_close()
+
+    def _refresh_tray(self) -> None:
+        if self.tray is None:
+            return
+        vitesse = 0.0
+        if self.bridge is not None:
+            vitesse = self.bridge.latest_values.get("speed", 0.0) or 0.0
+        etat = tray.etat_pont(self.bridge, en_mouvement=vitesse > 0.5)
+        self.tray.update(etat, self.bridge)
+
+    def _apply_smoothing(self) -> None:
+        """Relit le champ de lissage et l'applique, pont en marche ou non."""
+        reglages = smoothing.parse_reglages(self.smoothing_var.get())
+        # Reaffiche la forme normalisee : l'utilisateur voit ce qui a ete
+        # retenu, et donc ce qui a ete ignore (canal non lissable, valeur
+        # invalide).
+        self.smoothing_var.set(smoothing.formate_reglages(reglages))
+        for name, row_id in self.row_by_channel.items():
+            tau = reglages.get(name)
+            self.tree.set(row_id, "smooth", f"{tau:g} s" if tau else "")
+        if self.bridge:
+            self.bridge.smoother.configure(reglages)
+
+        # Un nom mal orthographie ne s'appliquerait a rien, en silence.
+        inconnus = sorted(n for n in reglages if n not in self.row_by_channel)
+        if inconnus:
+            self.status_var.set(
+                f"Lissage applique a {len(reglages) - len(inconnus)} canal(aux). "
+                f"Canaux inconnus ignores : {', '.join(inconnus)}")
+        else:
+            self.status_var.set(
+                f"Lissage applique a {len(reglages)} canal(aux)." if reglages
+                else "Lissage desactive.")
 
     def _on_send_car_name_toggled(self) -> None:
         if self.bridge:
@@ -310,6 +397,7 @@ class BridgeGUI:
             send_car_name=self.send_car_name_var.get(),
             ws_server=self.ws_server,
             derived=self.derived_var.get(),
+            smoothing_settings=smoothing.parse_reglages(self.smoothing_var.get()),
         )
         self.bridge.start()
         # Attente d'un evenement plutot qu'un `time.sleep(0.05)` : ce sommeil
@@ -372,6 +460,7 @@ class BridgeGUI:
                     f"{self.ws_server.client_count} client(s))"
                 )
             self.status_var.set(status)
+        self._refresh_tray()
         self.root.after(150, self._refresh_loop)
 
     def _refresh_vehicle_info(self, values: dict[str, float]) -> None:
@@ -411,12 +500,16 @@ class BridgeGUI:
             "ws_enabled": self.ws_enabled_var.get(),
             "ws_lan": self.ws_lan_var.get(),
             "derived": self.derived_var.get(),
+            "smoothing": self.smoothing_var.get(),
             "ws_differential": self.ws_differential_var.get(),
             "ws_port": as_number(self.ws_port_var, 8765),
             "ws_rate_hz": as_number(self.ws_rate_var, 30.0, float),
             "selected_channels": sorted(self.selected_channels),
         })
         save_config(self.config_data)
+        if self.tray is not None:
+            self.tray.stop()
+            self.tray = None
         self.root.destroy()
 
 

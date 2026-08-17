@@ -173,6 +173,61 @@ class TestRobustesse(BridgeTestCase):
         self.assertIn("panne simulee", self.bridge.error)
 
 
+class TestLissage(BridgeTestCase):
+    """Le lissage doit etre reellement branche dans la boucle : une mutation
+    qui le debranchait n'etait detectee par aucun test."""
+
+    def test_canal_lisse_emis_en_plus_du_brut(self):
+        self.demarre(selected_channels=frozenset({"speed_kmh"}),
+                     smoothing_settings={"speed_kmh": 0.2})
+        for _ in range(3):
+            envoie(self.port, make_packet(speed=30.0))
+        wait_until(lambda: self.bridge.packet_count >= 3)
+        wait_until(lambda: "/forza/speed_kmh_smooth" in self.recorder.addresses)
+
+        self.assertIn("/forza/speed_kmh", self.recorder.addresses)
+        self.assertIn("/forza/speed_kmh_smooth", self.recorder.addresses)
+
+    def test_valeur_brute_intacte_malgre_le_lissage(self):
+        """Garantie de non-alteration, verifiee de bout en bout."""
+        self.demarre(selected_channels=frozenset({"speed_kmh"}),
+                     smoothing_settings={"speed_kmh": 1.0})
+        envoie(self.port, make_packet(speed=0.0))
+        wait_until(lambda: self.bridge.packet_count >= 1)
+        envoie(self.port, make_packet(speed=50.0))
+        wait_until(lambda: self.bridge.packet_count >= 2)
+
+        bruts = [v for a, v in self.recorder.messages if a == "/forza/speed_kmh"]
+        self.assertAlmostEqual(bruts[-1], 180.0, places=3)  # 50 m/s = 180 km/h
+
+    def test_sans_reglage_aucun_canal_lisse(self):
+        self.demarre(selected_channels=frozenset({"speed_kmh"}))
+        envoie(self.port, make_packet(speed=30.0))
+        wait_until(lambda: "/forza/speed_kmh" in self.recorder.addresses)
+        self.assertNotIn("/forza/speed_kmh_smooth", self.recorder.addresses)
+
+    def test_annonce_dans_l_accueil(self):
+        self.demarre(selected_channels=frozenset({"speed_kmh"}),
+                     smoothing_settings={"speed_kmh": 0.2})
+        hello = self.bridge.hello()
+        self.assertIn("speed_kmh_smooth", hello["channels"])
+        self.assertEqual(hello["units"]["speed_kmh_smooth"], "km/h",
+                         "le lisse herite de l'unite de sa source")
+
+    def test_changement_de_vehicule_reinitialise_le_filtre(self):
+        """Sinon la sortie glisserait depuis les valeurs de l'ancienne voiture."""
+        self.demarre(selected_channels=frozenset({"speed_kmh"}),
+                     smoothing_settings={"speed_kmh": 5.0})
+        envoie(self.port, make_packet(speed=60.0, car_ordinal=292))
+        wait_until(lambda: self.bridge.packet_count >= 1)
+        envoie(self.port, make_packet(speed=0.0, car_ordinal=249))
+        wait_until(lambda: self.bridge.packet_count >= 2)
+
+        lisses = [v for a, v in self.recorder.messages
+                  if a == "/forza/speed_kmh_smooth"]
+        self.assertEqual(lisses[-1], 0.0)
+
+
 class TestHello(BridgeTestCase):
     def test_contenu(self):
         self.demarre(selected_channels=frozenset({"speed", "gear"}))
