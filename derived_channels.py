@@ -21,6 +21,17 @@ G = 9.80665  # acceleration de la pesanteur, m/s2
 STEER_MAX = 127.0  # `steer` est un octet signe
 PEDAL_MAX = 255.0  # accelerateur, frein, embrayage et frein a main
 
+# Valeur que le jeu ecrit dans `gear` pendant un changement de rapport, mesuree
+# le 17 aout 2026 sur deux voitures (dont une a 5 rapports, donc ce n'est pas
+# un onzieme rapport) : 13 bouffees de 132 a 233 ms sur 45 s de capture brute,
+# ou SEUL l'octet 319 change — ses voisins (accel, brake, clutch, hand_brake,
+# steer, driving_line) restent immobiles, ce qui exclut un desalignement.
+# Non documente par Turn 10 : ce n'est donc pas un nom officiel mais un
+# constat. On teste l'egalite stricte plutot qu'un seuil : si une autre valeur
+# apparaissait, `gear` la montrerait telle quelle au lieu d'etre silencieusement
+# traduite en "changement de rapport".
+SHIFTING_GEAR = 11
+
 
 def _borne(valeur: float, mini: float, maxi: float) -> float:
     return max(mini, min(maxi, valeur))
@@ -67,7 +78,7 @@ DERIVED_CHANNELS: list[str] = [
     "g_lateral", "g_vertical", "g_longitudinal",
     "yaw_deg", "pitch_deg", "roll_deg",
     "tire_temp_fl_c", "tire_temp_fr_c", "tire_temp_rl_c", "tire_temp_rr_c",
-    "slip_max",
+    "slip_max", "shifting",
 ]
 
 DERIVED_UNITS: dict[str, str] = {
@@ -90,6 +101,7 @@ DERIVED_UNITS: dict[str, str] = {
     "tire_temp_rl_c": "degC",
     "tire_temp_rr_c": "degC",
     "slip_max": "normalised (|x| > 1 = grip loss)",
+    "shifting": "0/1 (1 = no gear engaged)",
 }
 
 
@@ -119,5 +131,13 @@ def compute(values: dict) -> dict:
                    if isinstance(values.get(nom), (int, float))]
     if glissements:
         derives["slip_max"] = float(max(abs(valeur) for valeur in glissements))
+
+    # Changement de rapport en cours. `gear` garde sa valeur brute, 11
+    # comprise : un consommateur qui mappe le rapport sur un nombre, une
+    # couleur ou un son se sert de ce drapeau, sans qu'on ait a falsifier la
+    # donnee d'origine.
+    rapport = values.get("gear")
+    if isinstance(rapport, int) and not isinstance(rapport, bool):
+        derives["shifting"] = 1.0 if rapport == SHIFTING_GEAR else 0.0
 
     return derives

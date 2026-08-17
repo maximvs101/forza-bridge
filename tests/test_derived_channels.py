@@ -108,6 +108,7 @@ class TestCoherence(unittest.TestCase):
             "current_engine_rpm": 5000.0, "engine_max_rpm": 8000.0,
             "tire_combined_slip_fl": 0.1, "tire_combined_slip_fr": 0.2,
             "tire_combined_slip_rl": 0.3, "tire_combined_slip_rr": 0.4,
+            "gear": 3,
         }
         produits = compute(trame)
         self.assertEqual(sorted(produits), sorted(DERIVED_CHANNELS))
@@ -120,6 +121,60 @@ class TestCoherence(unittest.TestCase):
         for nom in DERIVED_CHANNELS:
             with self.subTest(canal=nom):
                 self.assertIn(nom, UNITS)
+
+
+class TestChangementDeRapport(unittest.TestCase):
+    """`gear` vaut 11 pendant un passage de rapport.
+
+    Constate sur deux voitures, puis prouve sur 45 s de capture brute : dans
+    les 168 trames concernees, SEUL l'octet 319 change — ses voisins (accel,
+    brake, clutch, hand_brake, steer, driving_line) restent immobiles, et
+    l'horodatage du jeu reste strictement croissant. Ce n'est donc ni un
+    desalignement ni une trame parasite.
+
+    Le canal `shifting` expose ce drapeau SANS toucher a `gear`, comme le
+    lissage qui s'ajoute au canal brut.
+    """
+
+    def test_signale_le_passage(self):
+        self.assertEqual(compute({"gear": 11})["shifting"], 1.0)
+
+    def test_rapports_reels_a_zero(self):
+        for rapport in range(0, 11):        # 0 = marche arriere
+            with self.subTest(rapport=rapport):
+                self.assertEqual(compute({"gear": rapport})["shifting"], 0.0)
+
+    def test_gear_reste_intact(self):
+        """Contre-epreuve de la regle du projet : on ajoute, on ne corrige
+        jamais la donnee d'origine."""
+        valeurs = {"gear": 11}
+        derives = compute(valeurs)
+        self.assertEqual(valeurs["gear"], 11, "le canal brut a ete modifie")
+        self.assertNotIn("gear", derives)
+
+    def test_absent_sans_rapport(self):
+        """Une trame sled ne porte pas `gear` : pas de drapeau invente."""
+        self.assertNotIn("shifting", compute({"speed": 10.0}))
+
+    def test_egalite_stricte_et_non_seuil(self):
+        """Un seuil (`gear > 10`) absorberait silencieusement une valeur
+        inconnue ; l'egalite stricte la laisse visible dans `gear`."""
+        self.assertEqual(compute({"gear": 12})["shifting"], 0.0)
+        self.assertEqual(compute({"gear": 200})["shifting"], 0.0)
+
+    def test_non_lissable(self):
+        """Moyenner un drapeau donnerait 0,3 pendant un passage."""
+        import smoothing
+        self.assertIn("shifting", smoothing.NOT_SMOOTHABLE)
+
+    def test_sequence_reelle_mesuree(self):
+        """Sequence relevee dans la capture brute du 17 aout 2026 : le
+        drapeau doit monter puis retomber une seule fois, entre deux rapports
+        differents."""
+        sequence = [2, 2, 11, 11, 11, 11, 11, 11, 11, 11, 11, 3, 3]
+        drapeaux = [compute({"gear": g})["shifting"] for g in sequence]
+        self.assertEqual(drapeaux, [0.0, 0.0] + [1.0] * 9 + [0.0, 0.0])
+        self.assertEqual(sum(drapeaux), 9.0)
 
 
 if __name__ == "__main__":

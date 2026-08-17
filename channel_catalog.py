@@ -161,6 +161,10 @@ DEFAULT_SELECTION: set[str] = {
     # consommateurs de refaire les memes conversions.
     "speed_kmh", "rpm_ratio", "throttle", "brake_pedal", "steer_norm",
     "g_lateral", "g_longitudinal", "slip_max",
+    # `gear` fait partie de la selection par defaut, donc son drapeau de
+    # changement de rapport aussi : sinon le consommateur voit le 11 sans
+    # avoir de quoi l'interpreter.
+    "shifting",
     "accel", "brake", "steer",
     "acceleration_x", "acceleration_y", "acceleration_z",
     "position_x", "position_y", "position_z",

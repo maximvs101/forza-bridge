@@ -6,7 +6,7 @@ cables.gl, vvvv), lighting (QLC+, Chataigne), sound (SuperCollider, Pure Data,
 Sonic Pi, VCV Rack), streaming overlays.
 
 The bridge listens to the game's "Data Out" stream, decodes the 88 packet
-fields, computes 19 more already scaled for use, and rebroadcasts everything.
+fields, computes 20 more already scaled for use, and rebroadcasts everything.
 
 ## Quick start
 
@@ -94,7 +94,7 @@ Three message types:
 
 ## Channels
 
-**88 raw channels** decoded from the packet, plus **19 computed channels**.
+**88 raw channels** decoded from the packet, plus **20 computed channels**.
 Raw channels are never replaced: everything is added.
 
 | Computed | From | Unit |
@@ -107,6 +107,7 @@ Raw channels are never replaced: everything is added.
 | `yaw_deg`, `pitch_deg`, `roll_deg` | radians | degrees |
 | `tire_temp_*_c` | °F | °C |
 | `slip_max` | greatest of the 4 slips | normalised |
+| `shifting` | `gear == 11` | 0/1 |
 
 Bounded values map straight onto an opacity, a scale or a volume.
 `--no-derived` turns them off.
@@ -120,9 +121,21 @@ Measured on two different cars: the game sends `gear = 11` in bursts of 150 to
 a transient, not a ratio. One of the two cars is a 5-speed, so 11 cannot be an
 eleventh gear: it is the game's way of saying no gear is engaged.
 
-The value is passed through untouched, like every other raw field. A consumer
-that maps `gear` to a number, a colour or a sample should treat 11 as
-"shifting" rather than as a gear.
+Proven on 45 s of raw capture — 2701 packets, all 324 bytes, 168 of them at
+`gear = 11` in 13 bursts. In those frames **only byte 319 changes**: its
+neighbours (`accel`, `brake`, `clutch`, `hand_brake`, `steer`,
+`normalized_driving_line`) stay put, which rules out a misalignment. The game's
+own timestamp stays strictly increasing at 16 ms, `is_race_on` stays 1, and
+every burst sits between two *different* gears (1→2, 2→3, 3→4, 4→3, 3→2, 2→1).
+The offsets match an independent FH6 parser
+([TheBanHammer/fh6-tel](https://github.com/TheBanHammer/fh6-tel)) field for
+field. Turn 10 does not document the value, so "no gear engaged" is an
+observation, not an official name.
+
+The value is passed through untouched, like every other raw field; the derived
+`shifting` channel carries the flag instead. The test is `gear == 11`, not
+`gear > 10`: a threshold would silently swallow any other unknown value, while
+strict equality leaves it visible in `gear`.
 
 ### Smoothing
 
@@ -148,7 +161,7 @@ smoothed: averaging two gears would give 2.7.
 Settings are grouped by role — **Input**, **OSC output**, **WebSocket
 output** — rather than stacked in one block.
 
-The channel table lists all 107 channels with their category, unit, live
+The channel table lists all 108 channels with their category, unit, live
 value and smoothing. Clicking the **Send** column toggles a channel; the rest
 of the row selects it, so several channels can be picked at once (Space
 toggles the selection). **Filter** plus the **Filtered** button is the usual

@@ -85,9 +85,10 @@ class TestTextesDesModules(unittest.TestCase):
 # d'ajouter son vocabulaire ici : c'est voulu, c'est un acte delibere.
 VOCABULAIRE_UNITES = {
     "awd", "compression", "cylinders", "deepest", "degc", "degf", "degrees",
-    "dimensionless", "extension", "fraction", "full", "fwd", "g", "gear",
-    "grip", "h", "identifier", "index", "km", "lap", "left", "loss", "m",
-    "mph", "ms", "n", "normalised", "number", "pi", "position", "puddle",
+    "dimensionless", "engaged", "extension", "fraction", "full", "fwd", "g",
+    "gear", "grip", "h", "identifier", "index", "km", "lap", "left", "loss",
+    "m", "mph", "ms", "n", "no", "normalised", "number", "pi", "position",
+    "puddle",
     "rad", "redline", "reverse", "right", "rpm", "rwd", "s", "s1", "s2",
     "undocumented", "unknown", "w", "x",
 }

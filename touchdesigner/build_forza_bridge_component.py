@@ -75,7 +75,7 @@ CATEGORIES = {
         "g_lateral", "g_vertical", "g_longitudinal",
         "yaw_deg", "pitch_deg", "roll_deg",
         "tire_temp_fl_c", "tire_temp_fr_c", "tire_temp_rl_c", "tire_temp_rr_c",
-        "slip_max",
+        "slip_max", "shifting",
     ],
 }
 

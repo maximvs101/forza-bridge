@@ -41,6 +41,9 @@ NOT_SMOOTHABLE = frozenset({
     "wheel_on_rumble_strip_fl", "wheel_on_rumble_strip_fr",
     "wheel_on_rumble_strip_rl", "wheel_on_rumble_strip_rr",
     "car_name",
+    # Drapeau 0/1 : une moyenne donnerait 0,3 pendant un passage de rapport,
+    # ce qui ne veut rien dire.
+    "shifting",
 })
 
 
