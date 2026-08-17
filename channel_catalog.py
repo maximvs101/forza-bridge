@@ -5,6 +5,8 @@ et definit une selection par defaut ("essentiels") pour un demarrage rapide.
 Les champs internes non documentes (horizon_unknown_*) sont exclus.
 """
 
+from derived_channels import DERIVED_CHANNELS, DERIVED_UNITS
+
 CATEGORIES: dict[str, list[str]] = {
     "General": ["is_race_on", "timestamp_ms"],
     "Moteur": ["engine_max_rpm", "engine_idle_rpm", "current_engine_rpm"],
@@ -54,6 +56,14 @@ CATEGORIES: dict[str, list[str]] = {
         "horizon_unknown_1", "horizon_unknown_2",
     ],
 }
+
+# Canaux bruts, tels que decodes du paquet Forza.
+RAW_CHANNELS: list[str] = [name for names in CATEGORIES.values() for name in names]
+
+# Canaux calcules par le pont (unites usuelles, grandeurs bornees). Ajoutes au
+# catalogue pour apparaitre dans l'interface, la table TouchDesigner et le
+# message d'accueil comme n'importe quel autre canal.
+CATEGORIES["Derives"] = list(DERIVED_CHANNELS)
 
 ALL_CHANNELS: list[str] = [name for names in CATEGORIES.values() for name in names]
 
@@ -136,10 +146,17 @@ UNITS: dict[str, str] = {
     "horizon_unknown_2": "inconnu (non documente)",
 }
 
+# Unites des canaux calcules par le pont.
+UNITS.update(DERIVED_UNITS)
+
 DEFAULT_SELECTION: set[str] = {
     # engine_max_rpm sert de reference de mise a l'echelle pour toute jauge
     # de regime : sans lui les consommateurs doivent deviner la zone rouge.
     "speed", "current_engine_rpm", "engine_max_rpm", "gear",
+    # Canaux derives : bornes et en unites usuelles, ils evitent aux
+    # consommateurs de refaire les memes conversions.
+    "speed_kmh", "rpm_ratio", "throttle", "brake_pedal", "steer_norm",
+    "g_lateral", "g_longitudinal", "slip_max",
     "accel", "brake", "steer",
     "acceleration_x", "acceleration_y", "acceleration_z",
     "position_x", "position_y", "position_z",

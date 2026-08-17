@@ -67,6 +67,16 @@ CATEGORIES = {
     "Non documente": [
         "horizon_unknown_1", "horizon_unknown_2",
     ],
+    # Calcules par la passerelle : unites usuelles et grandeurs bornees,
+    # directement exploitables sans conversion cote TouchDesigner.
+    "Derives": [
+        "speed_kmh", "speed_mph", "rpm_ratio",
+        "throttle", "brake_pedal", "clutch_pedal", "handbrake_pedal", "steer_norm",
+        "g_lateral", "g_vertical", "g_longitudinal",
+        "yaw_deg", "pitch_deg", "roll_deg",
+        "tire_temp_fl_c", "tire_temp_fr_c", "tire_temp_rl_c", "tire_temp_rr_c",
+        "slip_max",
+    ],
 }
 
 

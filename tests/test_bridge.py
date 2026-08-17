@@ -6,7 +6,7 @@ import threading
 import unittest
 
 from bridge import Bridge, _osc_safe
-from channel_catalog import ALL_CHANNELS
+from channel_catalog import ALL_CHANNELS, RAW_CHANNELS
 from tests.helpers import OscRecorder, free_port, make_packet, wait_until
 
 
@@ -68,11 +68,22 @@ class TestEmission(BridgeTestCase):
         self.assertEqual(mesures, {"/forza/speed", "/forza/gear"})
 
     def test_selection_none_envoie_tout(self):
+        """Canaux bruts ET derives, ces derniers etant calcules par le pont."""
         self.demarre(selected_channels=None)
         envoie(self.port, make_packet(speed=30.0))
-        wait_until(lambda: len(self.recorder.addresses) >= 88)
+        attendu = len(ALL_CHANNELS)
+        wait_until(lambda: len(self.recorder.addresses) >= attendu)
         mesures = {a for a in self.recorder.addresses if a != "/forza/car_name"}
-        self.assertEqual(len(mesures), 88)
+        self.assertEqual(len(mesures), attendu)
+        self.assertIn("/forza/speed_kmh", mesures)
+
+    def test_derives_desactivables(self):
+        self.demarre(selected_channels=None, derived=False)
+        envoie(self.port, make_packet(speed=30.0))
+        wait_until(lambda: len(self.recorder.addresses) >= len(RAW_CHANNELS))
+        mesures = {a for a in self.recorder.addresses if a != "/forza/car_name"}
+        self.assertEqual(len(mesures), len(RAW_CHANNELS))
+        self.assertNotIn("/forza/speed_kmh", mesures)
 
     def test_nom_de_vehicule_emis_une_seule_fois(self):
         """Chaine envoyee au changement de voiture seulement, pas 60 fois/s."""

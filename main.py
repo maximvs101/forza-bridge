@@ -21,7 +21,7 @@ from ws_server import TelemetryWebSocketServer
 
 
 def run(listen_host: str, listen_port: int, td_host: str, td_port: int,
-        only_racing: bool, ws_host: str = "127.0.0.1",
+        only_racing: bool, ws_host: str = "127.0.0.1", derived: bool = True,
         ws_port: int | None = None, ws_rate_hz: float = 60.0,
         ws_differential: bool = True) -> int:
     ws_server = None
@@ -40,6 +40,7 @@ def run(listen_host: str, listen_port: int, td_host: str, td_port: int,
         selected_channels=None,  # tous les champs
         only_racing=only_racing,
         ws_server=ws_server,
+        derived=derived,
     )
     bridge.start()
     bridge.bound.wait(timeout=5)
@@ -103,6 +104,9 @@ def main() -> None:
         action="store_true",
         help="N'envoie des donnees que lorsque IsRaceOn=1 (course en cours)",
     )
+    parser.add_argument("--no-derived", action="store_true",
+                        help="N'emet que les canaux bruts du jeu, sans les canaux "
+                             "calcules (speed_kmh, throttle, g_lateral...)")
     parser.add_argument("--ws-port", type=int, default=8765,
                         help="Port du serveur WebSocket (defaut: 8765, 0 pour desactiver)")
     parser.add_argument("--ws-rate", type=float, default=60.0,
@@ -122,7 +126,7 @@ def main() -> None:
 
     try:
         code = run(args.listen_host, args.listen_port, args.td_host, args.td_port,
-                   args.only_racing,
+                   args.only_racing, derived=not args.no_derived,
                    ws_host="0.0.0.0" if args.ws_lan else "127.0.0.1",
                    ws_port=args.ws_port, ws_rate_hz=args.ws_rate,
                    ws_differential=not args.ws_full_frames)

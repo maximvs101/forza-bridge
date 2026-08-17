@@ -9,7 +9,8 @@ import unittest
 from pathlib import Path
 
 from channel_catalog import (ALL_CHANNELS, CATEGORIES, CATEGORY_OF,
-                             DEFAULT_SELECTION, UNITS)
+                             DEFAULT_SELECTION, RAW_CHANNELS, UNITS)
+from derived_channels import DERIVED_CHANNELS
 from forza_telemetry import _HORIZON_DASH
 
 CHAMPS_DECODES = [name for name, _ in _HORIZON_DASH]
@@ -41,9 +42,20 @@ class TestCatalogueContreDecodage(unittest.TestCase):
         manquants = [n for n in CHAMPS_DECODES if n not in set(ALL_CHANNELS)]
         self.assertEqual(manquants, [], f"champs emis mais non catalogues: {manquants}")
 
+    def test_canaux_bruts_exactement_les_champs_decodes(self):
+        self.assertEqual(sorted(RAW_CHANNELS), sorted(CHAMPS_DECODES))
+
     def test_aucun_canal_fantome(self):
-        orphelins = [n for n in ALL_CHANNELS if n not in set(CHAMPS_DECODES)]
+        """Tout canal catalogue doit etre soit decode du paquet, soit calcule."""
+        connus = set(CHAMPS_DECODES) | set(DERIVED_CHANNELS)
+        orphelins = [n for n in ALL_CHANNELS if n not in connus]
         self.assertEqual(orphelins, [], f"canaux catalogues mais jamais emis: {orphelins}")
+
+    def test_derives_ne_masquent_aucun_canal_brut(self):
+        """Un derive portant le nom d'un champ brut ecraserait la valeur du
+        jeu au moment de la fusion dans le pont."""
+        collisions = sorted(set(DERIVED_CHANNELS) & set(CHAMPS_DECODES))
+        self.assertEqual(collisions, [], f"noms en collision: {collisions}")
 
     def test_pas_de_doublon(self):
         self.assertEqual(len(ALL_CHANNELS), len(set(ALL_CHANNELS)))

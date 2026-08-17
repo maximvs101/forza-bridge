@@ -18,6 +18,7 @@ import threading
 from pythonosc.udp_client import SimpleUDPClient
 
 import car_lookup
+import derived_channels
 from channel_catalog import ALL_CHANNELS, CATEGORY_OF, UNITS
 from forza_telemetry import parse
 
@@ -59,8 +60,11 @@ class Bridge(threading.Thread):
                  selected_channels: frozenset[str] | None = None,
                  only_racing: bool = False,
                  send_car_name: bool = True,
-                 ws_server=None, osc_client=None):
+                 ws_server=None, osc_client=None, derived: bool = True):
         super().__init__(daemon=True)
+        # Canaux calcules (unites usuelles, grandeurs bornees) ajoutes aux
+        # canaux bruts. Voir derived_channels.py.
+        self.derived = derived
         self.listen_host = listen_host
         self.listen_port = listen_port
         self.selected_channels = selected_channels
@@ -156,6 +160,10 @@ class Bridge(threading.Thread):
                 continue
 
             values = frame.values
+            if self.derived:
+                # Fusionnes aux canaux bruts : tout l'aval (OSC, WebSocket,
+                # interface, accueil) les traite sans rien de particulier.
+                values = {**values, **derived_channels.compute(values)}
             self.latest_values = values
             self.packet_count += 1
 

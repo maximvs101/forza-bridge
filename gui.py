@@ -30,6 +30,7 @@ def load_config() -> dict:
         "send_car_name": True,
         "ws_enabled": True,
         "ws_lan": False,
+        "derived": True,
         "ws_differential": True,
         "ws_port": 8765,
         "ws_rate_hz": 60,
@@ -123,6 +124,13 @@ class BridgeGUI:
             text="Ouvrir le WebSocket au reseau local (sinon cette machine uniquement)",
             variable=self.ws_lan_var,
         ).grid(row=4, column=0, columnspan=5, sticky="w", padx=4, pady=(0, 2))
+
+        self.derived_var = tk.BooleanVar(value=self.config_data["derived"])
+        ttk.Checkbutton(
+            frame,
+            text="Canaux derives (speed_kmh, throttle, g_lateral... deja mis a l'echelle)",
+            variable=self.derived_var,
+        ).grid(row=2, column=4, columnspan=2, sticky="w", padx=4, pady=(0, 4))
 
         self.ws_differential_var = tk.BooleanVar(value=self.config_data["ws_differential"])
         ttk.Checkbutton(
@@ -301,6 +309,7 @@ class BridgeGUI:
             only_racing=self.only_racing_var.get(),
             send_car_name=self.send_car_name_var.get(),
             ws_server=self.ws_server,
+            derived=self.derived_var.get(),
         )
         self.bridge.start()
         # Attente d'un evenement plutot qu'un `time.sleep(0.05)` : ce sommeil
@@ -401,6 +410,7 @@ class BridgeGUI:
             "send_car_name": self.send_car_name_var.get(),
             "ws_enabled": self.ws_enabled_var.get(),
             "ws_lan": self.ws_lan_var.get(),
+            "derived": self.derived_var.get(),
             "ws_differential": self.ws_differential_var.get(),
             "ws_port": as_number(self.ws_port_var, 8765),
             "ws_rate_hz": as_number(self.ws_rate_var, 30.0, float),
