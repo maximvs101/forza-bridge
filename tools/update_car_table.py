@@ -15,10 +15,6 @@ Usage :
     python tools/update_car_table.py --file liste.json --write
 """
 
-# Cette ligne est AFFICHEE par --help : elle est donc en anglais, contrairement
-# au docstring ci-dessus qui n'est que de la documentation interne.
-DESCRIPTION = "Update the ordinal -> vehicle name table."
-
 from __future__ import annotations
 
 import argparse
@@ -27,6 +23,13 @@ import os
 import sys
 import urllib.request
 from pathlib import Path
+
+# Cette ligne est AFFICHEE par --help : elle est donc en anglais, contrairement
+# au docstring ci-dessus qui n'est que de la documentation interne.
+# NE PAS la remonter avant `from __future__` : c'est une erreur de syntaxe, et
+# `ast.parse` ne la signale pas — le test de langue lisait donc le fichier sans
+# broncher alors que l'outil ne demarrait plus.
+DESCRIPTION = "Update the ordinal -> vehicle name table."
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE))

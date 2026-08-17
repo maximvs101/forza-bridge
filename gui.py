@@ -556,11 +556,14 @@ class BridgeGUI:
                 self.ws_enabled_var.set(False)
                 self._refresh_controls()
                 return
-            self.bridge.ws_server = self.ws_server
+            # attach_ws_server et non une affectation : les fabriques du
+            # message d'accueil et de la trame d'etat doivent suivre, sinon le
+            # serveur annonce 0 canal et aucun vehicule.
+            self.bridge.attach_ws_server(self.ws_server)
             self.status_var.set(
                 f"WebSocket started on port {self.ws_server.port}.")
         elif not wanted and self.ws_server is not None:
-            self.bridge.ws_server = None   # avant l'arret : la boucle le relit
+            self.bridge.attach_ws_server(None)  # avant l'arret : relu en boucle
             self._stop_ws()
             self.status_var.set("WebSocket stopped.")
         self._refresh_controls()

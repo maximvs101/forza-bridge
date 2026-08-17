@@ -280,7 +280,23 @@ Two of them guard things a functional test would never notice:
 - `test_gui_reglages_a_chaud.py` — a checkbox that changes something must
   really change it, and one that cannot must be greyed out. It also asserts
   the widgets carry a `command` at all: a checkbox wired to nothing compiles,
-  runs, and passes every functional test while doing nothing.
+  runs, and passes every functional test while doing nothing. Some cases drive
+  the widget through `invoke()` — the click path — rather than calling the
+  handler, and one uses a **real** `Bridge` rather than a fake, because a fake
+  cannot notice a missing wiring.
+- `test_sources_compilent.py` — every source file must **compile**, and each
+  command-line tool must answer `--help`. `ast.parse` does not enforce
+  `from __future__` placement, so the language check happily read a tool that
+  no longer started; nothing imported it, so nothing noticed.
+- `test_update_car_table.py` — the maintenance tool, the only module that can
+  destroy curated data. Covers the merge, the atomic write, `--remove`, and
+  malformed sources: an empty or broken source must leave the table untouched.
+- `test_overlay.py` + `overlay_harness.mjs` — the overlay's own JavaScript,
+  loaded from the shipped file into a `vm` context with a stubbed DOM,
+  WebSocket and clock. It covers the differential merge, the status
+  precedence, gauge clamping and malformed frames. A counter-check breaks a
+  string in `overlay.html` and requires the harness to fail, proving it reads
+  the real file. Needs `node`; the test skips without it.
 
 ## Layout
 

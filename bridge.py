@@ -91,7 +91,9 @@ class Bridge(threading.Thread):
         self.selected_channels = selected_channels
         self.only_racing = only_racing
         self.send_car_name = send_car_name
-        self.ws_server = ws_server
+        # `ws_server` est branche plus bas par attach_ws_server(), une fois les
+        # attributs dont dependent hello() et status() en place.
+        self.ws_server = None
         # Doublons retires : deux fois la meme destination ouvrirait deux
         # sockets et doublerait reellement le trafic vers le meme point.
         targets = list(dict.fromkeys(
@@ -126,8 +128,20 @@ class Bridge(threading.Thread):
         self._last_ordinal: int | None = None
         self._car_name: str = "-"
 
-        # Le serveur ne connait pas les canaux emis : c'est le pont qui
-        # fournit le contenu du message d'accueil.
+        self.attach_ws_server(ws_server)
+
+    def attach_ws_server(self, ws_server) -> None:
+        """Branche (ou debranche) le serveur WebSocket.
+
+        Le serveur ne connait pas les canaux emis : c'est le pont qui fournit
+        le contenu du message d'accueil et de la trame d'etat. Passer par
+        cette methode plutot que d'affecter `ws_server` directement, sinon les
+        fabriques manquent : mesure sur le jeu, un serveur demarre a chaud par
+        la case de l'interface annoncait alors 0 canal, aucun vehicule et
+        `packets: null` — le flux de telemetrie fonctionnait, ce qui rendait le
+        defaut discret.
+        """
+        self.ws_server = ws_server
         if ws_server is not None:
             ws_server.hello_factory = self.hello
             ws_server.status_factory = self.status

@@ -46,6 +46,22 @@ class FauxPont:
     def join(self, timeout=None):
         pass
 
+    # Le vrai pont fournit le contenu de l'accueil et de la trame d'etat : le
+    # faux doit exposer la meme surface, sinon il validerait une interface qui
+    # oublie de les brancher. TestServeurBrancheAuVraiPont verifie le contrat
+    # lui-meme, avec un vrai Bridge.
+    def hello(self):
+        return {"type": "hello", "channels": ["speed"]}
+
+    def status(self):
+        return {"packets": self.packet_count}
+
+    def attach_ws_server(self, ws_server):
+        self.ws_server = ws_server
+        if ws_server is not None:
+            ws_server.hello_factory = self.hello
+            ws_server.status_factory = self.status
+
 
 class ReglagesTestCase(unittest.TestCase):
     def setUp(self):
@@ -223,6 +239,131 @@ class TestCommandesGrisees(ReglagesTestCase):
         for widget in self.app._restart_widgets:
             with self.subTest(widget=widget.winfo_class()):
                 self.assertFalse(self._desactive(widget))
+
+
+class TestClicReel(ReglagesTestCase):
+    """Passe par le WIDGET, pas par la methode.
+
+    Les tests ci-dessus appellent `_on_ws_enabled_toggled()` directement : ils
+    ne prouvent donc pas qu'un CLIC y mene. `invoke()` fait ce que fait un
+    clic — basculer la variable et appeler la commande — donc une case mal
+    cablee echoue ici, ce qui est exactement le defaut constate par
+    l'utilisateur.
+    """
+
+    def _case(self, libelle: str):
+        trouvee = []
+
+        def descend(widget):
+            if (widget.winfo_class() == "TCheckbutton"
+                    and str(widget.cget("text")) == libelle):
+                trouvee.append(widget)
+            for enfant in widget.winfo_children():
+                descend(enfant)
+
+        descend(self.root)
+        self.assertEqual(len(trouvee), 1, f"case {libelle!r} introuvable")
+        return trouvee[0]
+
+    def test_clic_sur_enabled_demarre_puis_arrete_le_serveur(self):
+        port = free_port()
+        self.app.bridge = FauxPont()
+        self.app.ws_port_var.set(str(port))
+        self.app.ws_enabled_var.set(False)
+        case = self._case("Enabled")
+
+        case.invoke()                       # premier clic : on coche
+        self.assertTrue(self.app.ws_enabled_var.get())
+        self.assertIsNotNone(self.app.ws_server, self.app.status_var.get())
+        self.assertTrue(self._ecoute(port), "le clic n'a pas ouvert le port")
+        self.assertIs(self.app.bridge.ws_server, self.app.ws_server)
+
+        case.invoke()                       # second clic : on decoche
+        self.assertFalse(self.app.ws_enabled_var.get())
+        self.assertIsNone(self.app.ws_server)
+        self.assertFalse(self._ecoute(port), "le port est reste ouvert")
+
+    def test_clic_sur_only_racing_atteint_le_pont(self):
+        pont = self.app.bridge = FauxPont()
+        self.app.only_racing_var.set(False)
+        self._case("Only while racing").invoke()
+        self.assertTrue(pont.only_racing)
+
+    def test_clic_sur_canaux_derives_atteint_le_pont(self):
+        pont = self.app.bridge = FauxPont()
+        self.app.derived_var.set(True)
+        self._case("Computed channels").invoke()
+        self.assertFalse(pont.derived)
+
+    def test_clic_sur_le_bouton_start_bascule_le_libelle(self):
+        """Le bouton doit annoncer l'action suivante, pas l'etat courant."""
+        self.assertEqual(str(self.app.start_button.cget("text")), "Start")
+        self.app.bridge = FauxPont()
+        self.app.start_button.configure(text="Stop")
+        self.app.start_button.invoke()       # declenche _toggle_bridge -> stop
+        self.assertIsNone(self.app.bridge)
+        self.assertEqual(str(self.app.start_button.cget("text")), "Start")
+
+
+class TestServeurBrancheAuVraiPont(ReglagesTestCase):
+    """Avec un VRAI Bridge, et un vrai client.
+
+    Defaut trouve en essayant l'interface sur le jeu, pas par ces tests : un
+    serveur demarre a chaud n'avait pas les fabriques du message d'accueil ni
+    de la trame d'etat — elles n'etaient posees que dans le constructeur du
+    pont. L'accueil annoncait 0 canal, aucun vehicule, `packets: null`, alors
+    que la telemetrie circulait normalement. Un faux pont ne pouvait pas le
+    voir : il n'a pas de fabriques.
+    """
+
+    def _vrai_pont(self):
+        from bridge import Bridge
+        from tests.helpers import OscRecorder
+        pont = Bridge(listen_port=free_port(), osc_clients=[OscRecorder()],
+                      selected_channels=frozenset({"speed", "gear"}))
+        self.addCleanup(pont.join, 3)
+        self.addCleanup(pont.stop)
+        pont.start()
+        self.assertTrue(pont.bound.wait(5))
+        return pont
+
+    def test_fabriques_posees_au_demarrage_a_chaud(self):
+        pont = self.app.bridge = self._vrai_pont()
+        self.app.ws_port_var.set(str(free_port()))
+        self.app.ws_enabled_var.set(True)
+        self.app._on_ws_enabled_toggled()
+        self.assertIsNotNone(self.app.ws_server, self.app.status_var.get())
+
+        serveur = self.app.ws_server
+        self.assertEqual(serveur.hello_factory, pont.hello,
+                         "message d'accueil sans contenu : 0 canal annonce")
+        self.assertEqual(serveur.status_factory, pont.status,
+                         "trame d'etat sans compteurs")
+
+    def test_accueil_reellement_rempli(self):
+        """Le critere qui compte : ce que recoit un client."""
+        pont = self.app.bridge = self._vrai_pont()
+        self.app.ws_port_var.set(str(free_port()))
+        self.app.ws_enabled_var.set(True)
+        self.app._on_ws_enabled_toggled()
+        self.assertIsNotNone(self.app.ws_server, self.app.status_var.get())
+
+        accueil = self.app.ws_server.hello_factory()
+        self.assertGreater(len(accueil.get("channels", [])), 0,
+                           "aucun canal annonce a l'accueil")
+        self.assertIn("speed", accueil["channels"])
+        etat = self.app.ws_server.status_factory()
+        self.assertIn("packets", etat)
+
+    def test_detache_a_l_arret(self):
+        pont = self.app.bridge = self._vrai_pont()
+        self.app.ws_port_var.set(str(free_port()))
+        self.app.ws_enabled_var.set(True)
+        self.app._on_ws_enabled_toggled()
+        self.app.ws_enabled_var.set(False)
+        self.app._on_ws_enabled_toggled()
+        self.assertIsNone(pont.ws_server,
+                          "le pont publierait vers un serveur arrete")
 
 
 class TestCablageDesCases(ReglagesTestCase):
