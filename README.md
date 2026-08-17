@@ -111,6 +111,19 @@ Raw channels are never replaced: everything is added.
 Bounded values map straight onto an opacity, a scale or a volume.
 `--no-derived` turns them off.
 
+### `gear` reports 11 while shifting
+
+Measured on two different cars: the game sends `gear = 11` in bursts of 150 to
+400 ms, and **every** gear change passes through it — `3 → 11 → 4`, never
+`3 → 4`. Real gears each hold a coherent speed band (3rd: 82-140 km/h, 4th:
+131-162 km/h); 11 spans all of them and holds none, which is the signature of
+a transient, not a ratio. One of the two cars is a 5-speed, so 11 cannot be an
+eleventh gear: it is the game's way of saying no gear is engaged.
+
+The value is passed through untouched, like every other raw field. A consumer
+that maps `gear` to a number, a colour or a sample should treat 11 as
+"shifting" rather than as a gear.
+
 ### Smoothing
 
 Telemetry is noisy. Smoothing is set per channel, as a time constant in
