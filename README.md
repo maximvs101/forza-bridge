@@ -145,6 +145,13 @@ Smoothing applies to the selection: pick rows, type a duration, press **Apply
 to selection**. Channels that must not be smoothed are named in the status
 bar rather than silently skipped.
 
+Settings that can be applied while the bridge runs are applied immediately:
+the WebSocket **Enabled** box really starts and stops the server, and **Only
+while racing** and **Computed channels** take effect on the next packet. The
+ones that cannot — the Forza UDP port, the OSC destinations, and the WebSocket
+port, rate and scope — are **greyed out** while they would have no effect.
+An active control that does nothing is the interface lying to you.
+
 A colour-coded state indicator sits in the status bar and in the system tray.
 Closing the window hides the app in the tray without stopping the bridge.
 Settings are saved to `config.json`.
@@ -225,6 +232,10 @@ Two of them guard things a functional test would never notice:
 - `test_gui_layout.py` — the window must be at least as large as its content
   demands, and `minsize` must cover it too. It checks the *relationship*, not
   a hard-coded size: the hard-coded size was the defect.
+- `test_gui_reglages_a_chaud.py` — a checkbox that changes something must
+  really change it, and one that cannot must be greyed out. It also asserts
+  the widgets carry a `command` at all: a checkbox wired to nothing compiles,
+  runs, and passes every functional test while doing nothing.
 
 ## Layout
 

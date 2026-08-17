@@ -94,6 +94,7 @@ class BridgeGUI:
         self._build_channels()
 
         self._refresh_smoothing_column()
+        self._refresh_controls()
         self._setup_tray()
         # Fermer la fenetre replie dans la barre d'etat plutot que d'arreter
         # le pont : c'est un outil qu'on laisse tourner pendant qu'on joue.
@@ -115,15 +116,21 @@ class BridgeGUI:
         ttk.Label(box, text="Forza UDP port").grid(row=0, column=0, sticky="w",
                                                    padx=6, pady=(6, 2))
         self.listen_port_var = tk.StringVar(value=str(self.config_data["listen_port"]))
-        ttk.Entry(box, textvariable=self.listen_port_var, width=8).grid(
-            row=0, column=1, sticky="w", padx=6, pady=(6, 2))
+        entry = ttk.Entry(box, textvariable=self.listen_port_var, width=8)
+        entry.grid(row=0, column=1, sticky="w", padx=6, pady=(6, 2))
+        # Change le socket d'ecoute : inapplicable sans redemarrer le pont,
+        # donc grise pendant la marche plutot que d'accepter une saisie sans
+        # effet.
+        self._restart_widgets = [entry]
         self.only_racing_var = tk.BooleanVar(value=self.config_data["only_racing"])
         ttk.Checkbutton(box, text="Only while racing",
-                        variable=self.only_racing_var).grid(
+                        variable=self.only_racing_var,
+                        command=self._on_only_racing_toggled).grid(
             row=1, column=0, columnspan=2, sticky="w", padx=6)
         self.derived_var = tk.BooleanVar(value=self.config_data["derived"])
         ttk.Checkbutton(box, text="Computed channels",
-                        variable=self.derived_var).grid(
+                        variable=self.derived_var,
+                        command=self._on_derived_toggled).grid(
             row=2, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 6))
 
         # -- OSC output
@@ -133,8 +140,9 @@ class BridgeGUI:
         ttk.Label(box, text="Destinations (host:port, comma separated)").grid(
             row=0, column=0, sticky="w", padx=6, pady=(6, 2))
         self.osc_targets_var = tk.StringVar(value=self.config_data["osc_targets"])
-        ttk.Entry(box, textvariable=self.osc_targets_var).grid(
-            row=1, column=0, sticky="we", padx=6)
+        entry = ttk.Entry(box, textvariable=self.osc_targets_var)
+        entry.grid(row=1, column=0, sticky="we", padx=6)
+        self._restart_widgets.append(entry)
         self.send_car_name_var = tk.BooleanVar(value=self.config_data["send_car_name"])
         ttk.Checkbutton(box, text="Send /forza/car_name (a string, not a number)",
                         variable=self.send_car_name_var,
@@ -145,25 +153,32 @@ class BridgeGUI:
         box = ttk.LabelFrame(outer, text="WebSocket output")
         box.grid(row=0, column=2, sticky="nsew")
         self.ws_enabled_var = tk.BooleanVar(value=self.config_data["ws_enabled"])
-        ttk.Checkbutton(box, text="Enabled", variable=self.ws_enabled_var).grid(
+        # La case demarre et arrete VRAIMENT le serveur, pont en marche
+        # compris : sans cette commande, la cocher pendant la marche ne
+        # faisait rien et rien ne le signalait.
+        ttk.Checkbutton(box, text="Enabled", variable=self.ws_enabled_var,
+                        command=self._on_ws_enabled_toggled).grid(
             row=0, column=0, sticky="w", padx=6, pady=(6, 2))
         ttk.Label(box, text="port").grid(row=0, column=1, sticky="e", padx=2)
         self.ws_port_var = tk.StringVar(value=str(self.config_data["ws_port"]))
-        ttk.Entry(box, textvariable=self.ws_port_var, width=7).grid(
-            row=0, column=2, sticky="w", padx=(0, 6))
+        ws_port_entry = ttk.Entry(box, textvariable=self.ws_port_var, width=7)
+        ws_port_entry.grid(row=0, column=2, sticky="w", padx=(0, 6))
         ttk.Label(box, text="rate (Hz)").grid(row=1, column=1, sticky="e", padx=2)
         self.ws_rate_var = tk.StringVar(value=str(self.config_data["ws_rate_hz"]))
-        ttk.Entry(box, textvariable=self.ws_rate_var, width=7).grid(
-            row=1, column=2, sticky="w", padx=(0, 6))
+        ws_rate_entry = ttk.Entry(box, textvariable=self.ws_rate_var, width=7)
+        ws_rate_entry.grid(row=1, column=2, sticky="w", padx=(0, 6))
         self.ws_lan_var = tk.BooleanVar(value=self.config_data["ws_lan"])
-        ttk.Checkbutton(box, text="Open to local network",
-                        variable=self.ws_lan_var).grid(
-            row=2, column=0, columnspan=3, sticky="w", padx=6)
+        ws_lan_box = ttk.Checkbutton(box, text="Open to local network",
+                                     variable=self.ws_lan_var)
+        ws_lan_box.grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
         self.ws_differential_var = tk.BooleanVar(
             value=self.config_data["ws_differential"])
-        ttk.Checkbutton(box, text="Differential (changes only)",
-                        variable=self.ws_differential_var).grid(
-            row=3, column=0, columnspan=3, sticky="w", padx=6)
+        ws_diff_box = ttk.Checkbutton(box, text="Differential (changes only)",
+                                      variable=self.ws_differential_var)
+        ws_diff_box.grid(row=3, column=0, columnspan=3, sticky="w", padx=6)
+        # Lues a la construction du serveur : modifiables seulement quand il
+        # est arrete. Decocher "Enabled" les rend a nouveau accessibles.
+        self._ws_widgets = [ws_port_entry, ws_rate_entry, ws_lan_box, ws_diff_box]
         ttk.Button(box, text="Open overlay", command=self._open_overlay).grid(
             row=4, column=0, columnspan=3, sticky="w", padx=6, pady=(2, 6))
 
@@ -424,6 +439,36 @@ class BridgeGUI:
         else:
             self._stop_bridge()
 
+    def _start_ws(self) -> bool:
+        """Demarre le serveur WebSocket avec les reglages affiches.
+
+        Extrait de `_start_bridge` pour que la case "Enabled" puisse s'en
+        servir a chaud : la boucle du pont relit `self.ws_server` a chaque
+        paquet, donc l'echange est immediat.
+        """
+        ws_port = self._read_port(self.ws_port_var, "WebSocket port")
+        if ws_port is None:
+            return False
+        try:
+            ws_rate = float(self.ws_rate_var.get())
+        except ValueError:
+            self.status_var.set("WebSocket rate: not a number.")
+            return False
+        if ws_rate <= 0:
+            self.status_var.set("WebSocket rate must be positive.")
+            return False
+        # Ecoute locale sauf demande explicite : le flux contient la
+        # position du vehicule.
+        ws_host = "0.0.0.0" if self.ws_lan_var.get() else "127.0.0.1"
+        self.ws_server = TelemetryWebSocketServer(
+            host=ws_host, port=ws_port, rate_hz=ws_rate,
+            differential=self.ws_differential_var.get())
+        if not self.ws_server.start():
+            self.status_var.set(f"WebSocket error: {self.ws_server.error}")
+            self.ws_server = None
+            return False
+        return True
+
     def _start_bridge(self) -> None:
         listen_port = self._read_port(self.listen_port_var, "Forza UDP port")
         if listen_port is None:
@@ -432,28 +477,8 @@ class BridgeGUI:
         if targets is None:
             return
 
-        if self.ws_enabled_var.get():
-            ws_port = self._read_port(self.ws_port_var, "WebSocket port")
-            if ws_port is None:
-                return
-            try:
-                ws_rate = float(self.ws_rate_var.get())
-            except ValueError:
-                self.status_var.set("WebSocket rate: not a number.")
-                return
-            if ws_rate <= 0:
-                self.status_var.set("WebSocket rate must be positive.")
-                return
-            # Ecoute locale sauf demande explicite : le flux contient la
-            # position du vehicule.
-            ws_host = "0.0.0.0" if self.ws_lan_var.get() else "127.0.0.1"
-            self.ws_server = TelemetryWebSocketServer(
-                host=ws_host, port=ws_port, rate_hz=ws_rate,
-                differential=self.ws_differential_var.get())
-            if not self.ws_server.start():
-                self.status_var.set(f"WebSocket error: {self.ws_server.error}")
-                self.ws_server = None
-                return
+        if self.ws_enabled_var.get() and not self._start_ws():
+            return
 
         try:
             self.bridge = Bridge(
@@ -486,6 +511,7 @@ class BridgeGUI:
 
         self.start_button.configure(text="Stop")
         self.status_var.set("")
+        self._refresh_controls()
 
     def _stop_ws(self) -> None:
         if self.ws_server is not None:
@@ -500,6 +526,52 @@ class BridgeGUI:
         self._stop_ws()
         self.start_button.configure(text="Start")
         self.status_var.set("Stopped.")
+        self._refresh_controls()
+
+    def _refresh_controls(self) -> None:
+        """Grise ce qui ne peut pas s'appliquer dans l'etat courant.
+
+        Une commande active qui ne fait rien est un mensonge de l'interface :
+        c'etait le cas de tout le cadre WebSocket, pont en marche.
+        """
+        running = self.bridge is not None
+        for widget in self._restart_widgets:
+            widget.configure(state="disabled" if running else "normal")
+        ws_running = self.ws_server is not None
+        for widget in self._ws_widgets:
+            widget.configure(state="disabled" if ws_running else "normal")
+
+    # -- reglages appliques a chaud -----------------------------------------
+
+    def _on_ws_enabled_toggled(self) -> None:
+        """Demarre ou arrete le serveur sans toucher au pont."""
+        wanted = self.ws_enabled_var.get()
+        if self.bridge is None:            # pont arrete : rien a demarrer
+            self._refresh_controls()
+            return
+        if wanted and self.ws_server is None:
+            if not self._start_ws():
+                # Message deja pose par _start_ws ; la case doit refleter
+                # l'echec, sinon elle annonce un serveur qui n'existe pas.
+                self.ws_enabled_var.set(False)
+                self._refresh_controls()
+                return
+            self.bridge.ws_server = self.ws_server
+            self.status_var.set(
+                f"WebSocket started on port {self.ws_server.port}.")
+        elif not wanted and self.ws_server is not None:
+            self.bridge.ws_server = None   # avant l'arret : la boucle le relit
+            self._stop_ws()
+            self.status_var.set("WebSocket stopped.")
+        self._refresh_controls()
+
+    def _on_only_racing_toggled(self) -> None:
+        if self.bridge:
+            self.bridge.only_racing = self.only_racing_var.get()
+
+    def _on_derived_toggled(self) -> None:
+        if self.bridge:
+            self.bridge.derived = self.derived_var.get()
 
     # -- tray --------------------------------------------------------------
 
