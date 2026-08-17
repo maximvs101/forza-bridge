@@ -224,7 +224,7 @@ class TestHello(BridgeTestCase):
         self.assertIn("engine_max_rpm", hello["channels"],
                       "champ de contexte toujours joint")
         self.assertEqual(hello["units"]["speed"], "m/s")
-        self.assertEqual(hello["categories"]["gear"], "Commandes")
+        self.assertEqual(hello["categories"]["gear"], "Controls")
 
     def test_selection_none_annonce_tout(self):
         self.demarre(selected_channels=None)

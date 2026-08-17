@@ -15,7 +15,7 @@ Le composant est ensuite sauvegarde en .tox a cote du projet courant,
 pour pouvoir etre glisse-depose (drag & drop) dans n'importe quel autre
 projet TouchDesigner comme un vrai plugin reutilisable.
 
-Correspond a la passerelle Python du dossier forza-td-bridge (main.py / gui.py),
+Correspond a la passerelle Python du dossier forza-bridge (main.py / gui.py),
 qui envoie chaque champ de telemetrie Forza en OSC sous l'adresse /forza/<champ>.
 """
 
@@ -24,20 +24,20 @@ qui envoie chaque champ de telemetrie Forza en OSC sous l'adresse /forza/<champ>
 # a un chemin Python externe au reseau TouchDesigner).
 CATEGORIES = {
     "General": ["is_race_on", "timestamp_ms"],
-    "Moteur": ["engine_max_rpm", "engine_idle_rpm", "current_engine_rpm"],
-    "Mouvement": [
+    "Engine": ["engine_max_rpm", "engine_idle_rpm", "current_engine_rpm"],
+    "Motion": [
         "acceleration_x", "acceleration_y", "acceleration_z",
         "velocity_x", "velocity_y", "velocity_z",
         "angular_velocity_x", "angular_velocity_y", "angular_velocity_z",
         "yaw", "pitch", "roll",
     ],
-    "Position / course": [
+    "Position / race": [
         "position_x", "position_y", "position_z",
         "speed", "power", "torque",
         "distance_traveled", "best_lap_time", "last_lap_time",
         "current_lap_time", "current_race_time", "lap_number", "race_position",
     ],
-    "Commandes": [
+    "Controls": [
         "accel", "brake", "clutch", "hand_brake", "gear",
         "steer", "norm_driving_line", "norm_ai_brake_difference", "boost", "fuel",
     ],
@@ -47,7 +47,7 @@ CATEGORIES = {
         "suspension_travel_meters_fl", "suspension_travel_meters_fr",
         "suspension_travel_meters_rl", "suspension_travel_meters_rr",
     ],
-    "Pneus": [
+    "Tyres": [
         "tire_slip_ratio_fl", "tire_slip_ratio_fr", "tire_slip_ratio_rl", "tire_slip_ratio_rr",
         "tire_slip_angle_fl", "tire_slip_angle_fr", "tire_slip_angle_rl", "tire_slip_angle_rr",
         "tire_combined_slip_fl", "tire_combined_slip_fr", "tire_combined_slip_rl", "tire_combined_slip_rr",
@@ -59,17 +59,17 @@ CATEGORIES = {
         "wheel_in_puddle_fl", "wheel_in_puddle_fr", "wheel_in_puddle_rl", "wheel_in_puddle_rr",
         "surface_rumble_fl", "surface_rumble_fr", "surface_rumble_rl", "surface_rumble_rr",
     ],
-    "Vehicule": [
+    "Vehicle": [
         "car_ordinal", "car_class", "car_performance_index",
         "drivetrain_type", "num_cylinders", "car_category",
     ],
     # Presents dans le paquet mais jamais identifies par la communaute.
-    "Non documente": [
+    "Undocumented": [
         "horizon_unknown_1", "horizon_unknown_2",
     ],
     # Calcules par la passerelle : unites usuelles et grandeurs bornees,
     # directement exploitables sans conversion cote TouchDesigner.
-    "Derives": [
+    "Derived": [
         "speed_kmh", "speed_mph", "rpm_ratio",
         "throttle", "brake_pedal", "clutch_pedal", "handbrake_pedal", "steer_norm",
         "g_lateral", "g_vertical", "g_longitudinal",
@@ -94,7 +94,7 @@ def build(destination=None):
     page = comp.appendCustomPage('Forza')
     port_par = page.appendInt('Port')[0]
     port_par.val = 7000
-    port_par.label = 'Port OSC (doit correspondre a la passerelle Python)'
+    port_par.label = 'OSC port (must match the Python bridge)'
 
     oscin1 = comp.create(oscinCHOP, 'oscin1')
     oscin1.nodeX, oscin1.nodeY = 0, 200
@@ -110,7 +110,7 @@ def build(destination=None):
     docs = comp.create(tableDAT, 'channel_docs')
     docs.nodeX, docs.nodeY = -300, 100
     docs.clear()
-    docs.appendRow(['categorie', 'canal'])
+    docs.appendRow(['category', 'channel'])
     for category, names in CATEGORIES.items():
         for name in names:
             docs.appendRow([category, name])
@@ -118,20 +118,20 @@ def build(destination=None):
     info = comp.create(textDAT, 'readme')
     info.nodeX, info.nodeY = -300, 200
     info.text = (
-        "Forza Bridge - sortie du composant : null1 (CHOP)\n"
-        "Reglez le parametre 'Port' (page Forza) pour qu'il corresponde\n"
-        "a la destination OSC de la passerelle Python :\n"
+        "Forza Bridge - component output: null1 (CHOP)\n"
+        "Set the 'Port' parameter (Forza page) to match the OSC\n"
+        "destination of the Python bridge:\n"
         "  main.py --osc 127.0.0.1:<port>\n"
-        "  ou le champ 'Destinations OSC' de gui.py\n"
-        "Voir channel_docs pour la liste des canaux disponibles."
+        "  or the 'Destinations' field in gui.py\n"
+        "See channel_docs for the list of available channels."
     )
 
     if project.folder:
         tox_path = project.folder + '/forza_bridge.tox'
         comp.save(tox_path)
-        print('Composant sauvegarde : ' + tox_path)
+        print('Component saved: ' + tox_path)
 
-    print('forza_bridge construit avec succes (' + str(len(comp.children)) + ' operateurs internes).')
+    print('forza_bridge built successfully (' + str(len(comp.children)) + ' internal operators).')
     return comp
 
 

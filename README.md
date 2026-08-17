@@ -1,63 +1,62 @@
-# Passerelle de télémétrie Forza Horizon
+# Forza Horizon telemetry bridge
 
-Transforme la télémétrie de *Forza Horizon 6* en sources d'interaction pour
-n'importe quel logiciel parlant **OSC** ou **WebSocket** : création visuelle
-(TouchDesigner, cables.gl, vvvv), lumière (QLC+, Chataigne), son
-(SuperCollider, Pure Data, Sonic Pi, VCV Rack), overlay de diffusion.
+Turns *Forza Horizon 6* telemetry into interaction sources for any software
+that speaks **OSC** or **WebSocket**: visual creation (TouchDesigner,
+cables.gl, vvvv), lighting (QLC+, Chataigne), sound (SuperCollider, Pure Data,
+Sonic Pi, VCV Rack), streaming overlays.
 
-La passerelle écoute le flux « Data Out » du jeu, décode les 88 champs du
-paquet, en calcule 19 de plus déjà mis à l'échelle, et rediffuse le tout.
+The bridge listens to the game's "Data Out" stream, decodes the 88 packet
+fields, computes 19 more already scaled for use, and rebroadcasts everything.
 
-## Démarrage rapide
+## Quick start
 
 ```bash
 pip install -r requirements.txt
 python gui.py
 ```
 
-Dans le jeu : **Réglages → HUD et repères de conduite → Data Out**, activer,
-saisir l'adresse réseau de la machine et le port **5300**.
+In the game: **Settings → HUD and Gameplay → Data Out**, enable it, enter the
+machine's network address and port **5300**.
 
-En ligne de commande, sans interface :
+Command line, no interface:
 
 ```bash
 python main.py
 ```
 
-## Réglage du jeu
+## About the game's stream
 
-Le jeu émet **un paquet par image rendue** : la cadence suit donc le nombre
-d'images par seconde, et non le protocole. Mesuré sur la même machine : 30 Hz
-et 60 Hz en roulant selon la charge, 60 Hz à l'arrêt.
+The game sends **one packet per rendered frame**, so the rate follows the
+frame rate rather than the protocol. Measured on the same machine: 30 Hz and
+60 Hz while driving depending on load, 60 Hz when stationary.
 
-Le format « Horizon Dash » fait **323 octets**, plus un octet de fin sur les
-paquets récents — c'est la taille observée sur FH6 aujourd'hui (**324**). Les
-deux sont acceptées, ainsi que le format « sled » seul (232).
+The "Horizon Dash" format is **323 bytes**, plus a trailing byte on recent
+packets — that is what FH6 sends today (**324**). Both are accepted, as is the
+"sled" format on its own (232).
 
-Le jeu émet depuis l'adresse réseau de la machine, pas depuis `127.0.0.1` :
-la passerelle écoute donc sur `0.0.0.0`.
+The game sends from the machine's network address, not from `127.0.0.1`, so
+the bridge listens on `0.0.0.0`.
 
-## Sorties
+## Outputs
 
 ### OSC
 
-Une adresse par canal, préfixée `/forza/` — `/forza/speed_kmh`,
-`/forza/rpm_ratio`… Plusieurs destinations sont possibles, ce qui permet
-d'alimenter simultanément plusieurs logiciels :
+One address per channel, prefixed `/forza/` — `/forza/speed_kmh`,
+`/forza/rpm_ratio`… Several destinations are possible, which lets you feed
+multiple programs at once:
 
 ```bash
 python main.py --osc 127.0.0.1:7000 --osc 192.168.0.50:9000
 python main.py --osc "127.0.0.1:7000, 192.168.0.50:9000"
 ```
 
-Les adresses IPv6 se donnent entre crochets : `[::1]:7000`. Une destination
-injoignable est signalée dans la barre d'état **sans arrêter les autres** ni
-la diffusion WebSocket.
+IPv6 addresses go in brackets: `[::1]:7000`. An unreachable destination is
+reported in the status bar **without stopping the others** or the WebSocket
+broadcast.
 
-Le nom du véhicule part sur `/forza/car_name` sous forme de chaîne, et
-uniquement au changement de voiture. Une chaîne n'est pas acceptée par tous
-les récepteurs sur leur entrée principale : dans TouchDesigner, il faut un
-**OSC In DAT**, pas un OSC In CHOP.
+The vehicle name is sent on `/forza/car_name` as a string, and only when the
+car changes. Not every receiver accepts a string on its main input: in
+TouchDesigner you need an **OSC In DAT**, not an OSC In CHOP.
 
 ### WebSocket
 
@@ -65,133 +64,140 @@ les récepteurs sur leur entrée principale : dans TouchDesigner, il faut un
 python main.py --ws-port 8765
 ```
 
-L'**overlay de démonstration est servi sur le même port** :
-<http://localhost:8765/> — utilisable directement comme source navigateur
-dans OBS (fond transparent).
+The **demo overlay is served on the same port**: <http://localhost:8765/> —
+usable directly as an OBS browser source (transparent background).
 
-Le serveur écoute sur `127.0.0.1` par défaut. Le flux contient la position du
-véhicule ; `--ws-lan` l'ouvre au réseau local, à faire sciemment.
+The server listens on `127.0.0.1` by default. The stream carries the vehicle
+position; `--ws-lan` opens it to the local network, which is a deliberate
+choice.
 
-**Réglages par client**, dans l'URL de connexion :
+**Per-client settings**, in the connection URL:
 
-| Paramètre | Effet |
+| Parameter | Effect |
 |---|---|
-| `?full=1` | état complet à chaque trame, sans fusion à faire |
-| `?channels=speed_kmh,gear` | ne recevoir que ces canaux |
+| `?full=1` | complete state on every frame, nothing to merge |
+| `?channels=speed_kmh,gear` | receive only these channels |
 
-Ou par commande JSON après connexion : `{"subscribe": [...]}`,
+Or by JSON command after connecting: `{"subscribe": [...]}`,
 `{"subscribe": "*"}`, `{"full": true}`.
 
-Trois types de messages :
+Three message types:
 
-- `hello` — schéma des canaux, unités, catégories, cadence, véhicule courant.
-  Un client n'a donc rien à coder en dur.
-- `telemetry` — les mesures. Par défaut **différentiel** : seuls les champs
-  qui varient sont émis, avec un état complet toutes les 2 s. Un client sans
-  état accumulé doit demander `?full=1`.
-- `status` — toutes les secondes, sert aussi de battement de cœur.
-  `receiving: false` signifie qu'aucun paquet n'arrive du jeu ; des paquets
-  qui arrivent sans rien faire varier (menu, voiture à l'arrêt) restent
-  `true`.
+- `hello` — channel schema, units, categories, rate, current vehicle. A client
+  needs nothing hard-coded.
+- `telemetry` — the measurements. **Differential** by default: only changed
+  fields are sent, with a complete state every 2 s. A client with no
+  accumulated state should ask for `?full=1`.
+- `status` — every second, doubling as a heartbeat. `receiving: false` means
+  no packet is arriving from the game; packets that arrive without changing
+  anything (menu, stationary car) stay `true`.
 
-## Canaux
+## Channels
 
-**88 canaux bruts** décodés du paquet, plus **19 canaux dérivés** calculés par
-la passerelle. Les bruts ne sont jamais remplacés : tout est ajouté.
+**88 raw channels** decoded from the packet, plus **19 computed channels**.
+Raw channels are never replaced: everything is added.
 
-| Dérivé | Depuis | Unité |
+| Computed | From | Unit |
 |---|---|---|
 | `speed_kmh`, `speed_mph` | `speed` (m/s) | km/h, mph |
-| `rpm_ratio` | régime ÷ régime max | 0-1 |
-| `throttle`, `brake_pedal`, `clutch_pedal`, `handbrake_pedal` | octets 0-255 | 0-1 |
+| `rpm_ratio` | rpm ÷ max rpm | 0-1 |
+| `throttle`, `brake_pedal`, `clutch_pedal`, `handbrake_pedal` | 0-255 bytes | 0-1 |
 | `steer_norm` | `steer` (-127..127) | -1..1 |
-| `g_lateral`, `g_vertical`, `g_longitudinal` | accélérations (m/s²) | g |
-| `yaw_deg`, `pitch_deg`, `roll_deg` | radians | degrés |
+| `g_lateral`, `g_vertical`, `g_longitudinal` | accelerations (m/s²) | g |
+| `yaw_deg`, `pitch_deg`, `roll_deg` | radians | degrees |
 | `tire_temp_*_c` | °F | °C |
-| `slip_max` | le plus fort des 4 glissements | normalisé |
+| `slip_max` | greatest of the 4 slips | normalised |
 
-Les grandeurs bornées se branchent directement sur une opacité, une échelle ou
-un volume. `--no-derived` les désactive.
+Bounded values map straight onto an opacity, a scale or a volume.
+`--no-derived` turns them off.
 
-### Lissage
+### Smoothing
 
-La télémétrie est bruitée. Le lissage est réglable canal par canal, par une
-constante de temps en secondes :
+Telemetry is noisy. Smoothing is set per channel, as a time constant in
+seconds:
 
 ```bash
 python main.py --smooth "slip_max=0.15, g_lateral=0.15"
 ```
 
-Il est **additif** : `slip_max_smooth` apparaît à côté de `slip_max`, qui
-reste intact. Un filtre retarde et rabote les extrêmes — écraser la valeur
-brute falsifierait la télémétrie pour qui l'analyse. Mesuré sur données
-réelles : 60 à 75 % d'agitation en moins sur les canaux bruités, extrêmes
-conservés dans le brut.
+It is **additive**: `slip_max_smooth` appears next to `slip_max`, which stays
+untouched. A filter delays and clips extremes — overwriting the raw value
+would falsify the telemetry for anyone analysing it. Measured on real data:
+60 to 75 % less jitter on noisy channels, extremes preserved in the raw one.
 
-Les entiers significatifs (rapport de boîte, numéro de tour, identifiant de
-véhicule) ne sont jamais lissés : une moyenne entre deux rapports donnerait
-2,7.
+Meaningful integers (gear, lap number, vehicle identifier) are never
+smoothed: averaging two gears would give 2.7.
 
-## Interface graphique
+## Graphical interface
 
 `python gui.py`
 
-- réception, destinations OSC, serveur WebSocket
-- les 107 canaux par catégorie, avec valeurs en direct, filtre et sélection
-- champ de lissage, colonne indiquant le réglage effectif
-- véhicule détecté : nom, classe, PI, transmission, cylindres
-- indicateur d'état à code couleur, repris dans la barre d'état système
+Settings are grouped by role — **Input**, **OSC output**, **WebSocket
+output** — rather than stacked in one block.
 
-Fermer la fenêtre replie l'application dans la barre système sans arrêter la
-passerelle. Les réglages sont enregistrés dans `config.json`.
+The channel table lists all 107 channels with their category, unit, live
+value and smoothing. Clicking the **Send** column toggles a channel; the rest
+of the row selects it, so several channels can be picked at once (Space
+toggles the selection). **Filter** plus the **Filtered** button is the usual
+gesture: type `tire`, then send everything shown.
+
+Smoothing applies to the selection: pick rows, type a duration, press **Apply
+to selection**. Channels that must not be smoothed are named in the status
+bar rather than silently skipped.
+
+A colour-coded state indicator sits in the status bar and in the system tray.
+Closing the window hides the app in the tray without stopping the bridge.
+Settings are saved to `config.json`.
+
+The window sizes itself from what its content actually measures, and cannot be
+shrunk below that. A hard-coded size only holds for the font and display
+scaling of the machine it was measured on: it truncated labels and pushed the
+status bar out of frame.
 
 ## TouchDesigner
 
-`touchdesigner/` contient deux scripts constructeurs, à coller dans un
-**Text DAT** (langage Python) et à exécuter une fois :
+`touchdesigner/` holds two builder scripts, to paste into a **Text DAT**
+(Python) and run once:
 
-- `build_forza_bridge_component.py` — crée un composant `forza_bridge` avec
-  un OSC In CHOP réglé (`Strip Prefix Segments = 1`, donc `/forza/speed`
-  devient le canal `speed`), une sortie Null CHOP et la table des canaux.
-  Sauvegardé en `.tox` réutilisable.
-- `build_forza_dashboard.py` — tableau de bord de base : vitesse, régime,
-  rapport, g-mètre. À exécuter **à l'intérieur** du composant.
+- `build_forza_bridge_component.py` — creates a `forza_bridge` component with
+  a configured OSC In CHOP (`Strip Prefix Segments = 1`, so `/forza/speed`
+  becomes the `speed` channel), a Null CHOP output and the channel table.
+  Saved as a reusable `.tox`.
+- `build_forza_dashboard.py` — basic dashboard: speed, rpm, gear, G-meter.
+  Run it **inside** the component.
 
 ## cables.gl
 
-`cables/build_cables_patch.py` génère un patch `.cables` complet, branché sur
-la passerelle, affichant véhicule, vitesse et régime dans une barre latérale.
+`cables/build_cables_patch.py` generates a complete `.cables` patch wired to
+the bridge, showing vehicle, speed and rpm in a sidebar.
 
 ```bash
-python cables/build_cables_patch.py --gabarit chemin/vers/un_patch.cables
+python cables/build_cables_patch.py --template path/to/a_patch.cables
 ```
 
-Le `--gabarit` reprend l'identité locale et la version du logiciel d'un patch
-existant, ce qui évite les écarts de format. Ouvrir ensuite par
-**File → Open patch** : le glisser-déposer part dans le téléverseur d'assets
-et échoue.
+`--template` reuses the local identity and software version of an existing
+patch, which avoids format mismatches. Open it with **File → Open patch**:
+drag and drop goes to the asset uploader and fails.
 
-L'URL du patch porte `?full=1`, car cables traite chaque message isolément :
-en différentiel, un champ figé y arriverait vide.
+The patch URL carries `?full=1`, because cables handles each message in
+isolation: in differential mode a static field would arrive empty.
 
-## Table des véhicules
+## Vehicle table
 
-`car_ordinals.json` traduit l'identifiant numérique envoyé par le jeu en nom
-lisible. Elle vient d'une liste communautaire, donc figée :
-les voitures ajoutées par les mises à jour du jeu s'affichent
-« Véhicule inconnu (ordinal N) », et ces ordinaux sont notés dans
-`car_ordinals_unknown.json`.
+`car_ordinals.json` maps the numeric identifier the game sends to a readable
+name. It comes from a community list, so it is frozen: cars added by game
+updates show as "Unknown vehicle (ordinal N)", and those ordinals are logged
+to `car_ordinals_unknown.json`.
 
 ```bash
-python tools/update_car_table.py            # aperçu des différences
-python tools/update_car_table.py --ecrire   # applique la fusion
+python tools/update_car_table.py           # preview the differences
+python tools/update_car_table.py --write   # apply the merge
 ```
 
-La mise à jour **fusionne** : les entrées locales absentes de la source sont
-conservées, puisque celle-ci n'est pas officielle. `--supprimer` les retire
-explicitement. Les renommages venus de la source sont en revanche appliqués,
-et affichés avant écriture — une source périmée peut donc revenir sur une
-correction locale de nom.
+The update **merges**: local entries missing from the source are kept, since
+the source is not official. `--remove` removes them explicitly. Renames
+coming from the source are applied, and printed before writing — so a stale
+source can revert a local name correction.
 
 ## Tests
 
@@ -199,37 +205,48 @@ correction locale de nom.
 python -m unittest discover -v
 ```
 
-Les tests n'utilisent que la bibliothèque standard, mais ils importent les
-modules du projet : `python-osc` et `websockets` doivent donc être installés
-(voir `requirements.txt`). Ils couvrent le décodage du paquet, le catalogue,
-les canaux dérivés, le lissage, les destinations OSC, la boucle de la
-passerelle, le serveur WebSocket et le service HTTP.
+The tests themselves only use the standard library, but they import the
+project's modules, so `python-osc` and `websockets` must be installed (see
+`requirements.txt`). They cover packet decoding, the catalogue, computed
+channels, smoothing, OSC destinations, the bridge loop, the WebSocket server
+and the HTTP service.
 
-Chaque test qui protège une correction porte en commentaire le défaut qu'il
-empêche de revenir. Plusieurs sont des **contre-épreuves** : elles vérifient
-qu'en désactivant l'option testée le comportement redevient bien l'ancien,
-sans quoi le test principal passerait même si la fonctionnalité ne servait à
-rien.
+Every test that protects a fix carries a comment naming the defect it keeps
+from coming back. Several are **counter-checks**: they verify that turning the
+tested option off restores the old behaviour, without which the main test
+would pass even if the feature did nothing.
 
-## Structure
+Two of them guard things a functional test would never notice:
 
-| Fichier | Rôle |
+- `test_langue_affichee.py` — every user-facing string must be in English.
+  Long messages are screened for French markers; short labels and units are
+  checked against a closed vocabulary, because a near-cognate ("Recommande"
+  for "Recommended") slips through any word-spotting. Verified by mutation.
+- `test_gui_layout.py` — the window must be at least as large as its content
+  demands, and `minsize` must cover it too. It checks the *relationship*, not
+  a hard-coded size: the hard-coded size was the defect.
+
+## Layout
+
+| File | Role |
 |---|---|
-| `forza_telemetry.py` | décodage du paquet UDP |
-| `osc_targets.py` | analyse et mise en forme des destinations OSC |
-| `channel_catalog.py` | catégories, unités, sélection par défaut |
-| `derived_channels.py` | canaux calculés |
-| `smoothing.py` | lissage temporel additif |
-| `car_lookup.py` | ordinal → véhicule, classes, transmissions |
-| `bridge.py` | boucle réception → OSC + WebSocket |
-| `ws_server.py` | serveur WebSocket (différentiel, abonnements, état) |
-| `http_assets.py` | overlay servi sur le port du WebSocket |
-| `main.py` / `gui.py` | ligne de commande / interface |
-| `tray.py` | icône de barre d'état système |
-| `web/overlay.html` | overlay de démonstration |
+| `forza_telemetry.py` | UDP packet decoding |
+| `channel_catalog.py` | categories, units, default selection |
+| `derived_channels.py` | computed channels |
+| `smoothing.py` | additive time-based smoothing |
+| `osc_targets.py` | OSC destination parsing and formatting |
+| `car_lookup.py` | ordinal → vehicle, classes, drivetrains |
+| `bridge.py` | receive loop → OSC + WebSocket |
+| `ws_server.py` | WebSocket server (differential, subscriptions, status) |
+| `http_assets.py` | overlay served on the WebSocket port |
+| `main.py` / `gui.py` | command line / interface |
+| `tray.py` | system tray icon |
+| `web/overlay.html` | demo overlay |
 
-## Dépendances
+Comments and docstrings are in French, the author's working language; every
+user-facing string is in English.
 
-`python-osc` et `websockets` sont nécessaires. `pystray` et `Pillow` ne
-servent qu'à l'icône de barre d'état : sans eux, l'interface reste une fenêtre
-ordinaire.
+## Dependencies
+
+`python-osc` and `websockets` are required. `pystray` and `Pillow` are only
+used for the tray icon: without them the interface stays an ordinary window.

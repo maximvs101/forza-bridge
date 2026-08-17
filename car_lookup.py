@@ -85,7 +85,7 @@ def describe(ordinal: int | float | None) -> str:
     if ordinal in (None, 0):
         return "-"
     note_unknown(ordinal)
-    return f"Vehicule inconnu (ordinal {int(ordinal)})"
+    return f"Unknown vehicle (ordinal {int(ordinal)})"
 
 
 def _charge_inconnus() -> None:

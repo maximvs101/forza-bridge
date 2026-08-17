@@ -105,7 +105,7 @@ class TestParametreChannels(UrlTestCase):
         serveur.hello_factory = lambda: {
             "channels": ["speed", "gear", "boost"],
             "units": {"speed": "m/s", "gear": "rapport", "boost": "sans dimension"},
-            "categories": {"speed": "Position", "gear": "Commandes", "boost": "Commandes"},
+            "categories": {"speed": "Position", "gear": "Controls", "boost": "Controls"},
         }
         hello, _ = self.collecte("/?channels=speed", combien=1)
         self.assertEqual(hello["channels"], ["speed"])

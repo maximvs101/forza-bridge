@@ -7,13 +7,17 @@ des differences, au lieu de laisser la table vieillir en silence.
 
 Source : gist communautaire "Forza Horizon 6 Car Ordinals" (HDR). Ce n'est
 PAS une source officielle : la mise a jour FUSIONNE, elle ne remplace pas.
-Les entrees locales absentes de la source sont conservees sauf --supprimer.
+Les entrees locales absentes de la source sont conservees sauf --remove.
 
 Usage :
-    python tools/update_car_table.py            # apercu, n'ecrit rien
-    python tools/update_car_table.py --ecrire   # applique la fusion
-    python tools/update_car_table.py --fichier liste.json --ecrire
+    python tools/update_car_table.py           # apercu, n'ecrit rien
+    python tools/update_car_table.py --write   # applique la fusion
+    python tools/update_car_table.py --file liste.json --write
 """
+
+# Cette ligne est AFFICHEE par --help : elle est donc en anglais, contrairement
+# au docstring ci-dessus qui n'est que de la documentation interne.
+DESCRIPTION = "Update the ordinal -> vehicle name table."
 
 from __future__ import annotations
 
@@ -54,7 +58,7 @@ def telecharge(url: str = GIST_DEFAUT) -> dict[str, str]:
         if fichier.get("truncated") or "content" not in fichier:
             return _json_distant(fichier["raw_url"])
         return json.loads(fichier["content"])
-    raise RuntimeError("aucun fichier JSON dans le gist")
+    raise RuntimeError("no JSON file in the gist")
 
 
 def en_table(nom_vers_ordinal: dict) -> dict[str, str]:
@@ -68,10 +72,10 @@ def en_table(nom_vers_ordinal: dict) -> dict[str, str]:
             continue
         table[cle] = nom
     if collisions:
-        print(f"ATTENTION : {len(collisions)} ordinal(aux) en double, "
-              f"premiere occurrence conservee")
+        print(f"WARNING: {len(collisions)} duplicate ordinal(s), "
+              f"first occurrence kept")
         for cle, garde, ecarte in collisions[:5]:
-            print(f"  {cle} : garde \"{garde}\", ecarte \"{ecarte}\"")
+            print(f"  {cle}: kept \"{garde}\", dropped \"{ecarte}\"")
     return dict(sorted(table.items(), key=lambda kv: int(kv[0])))
 
 
@@ -84,36 +88,36 @@ def compare(ancienne: dict, nouvelle: dict) -> tuple[list, list, list]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--ecrire", action="store_true",
-                        help="Applique la mise a jour (sans cela, simple apercu)")
-    parser.add_argument("--fichier", default=None,
-                        help="Utilise un fichier local au lieu de telecharger")
+    parser = argparse.ArgumentParser(description=DESCRIPTION)
+    parser.add_argument("--write", action="store_true",
+                        help="Apply the update (otherwise it is only a preview)")
+    parser.add_argument("--file", default=None,
+                        help="Use a local file instead of downloading")
     parser.add_argument("--url", default=GIST_DEFAUT,
-                        help="Autre source que le gist par defaut")
-    parser.add_argument("--supprimer", action="store_true",
-                        help="Retire aussi les entrees absentes de la source. "
-                             "Sans cette option les entrees locales sont "
-                             "conservees (la source n'est pas officielle).")
+                        help="Source other than the default gist")
+    parser.add_argument("--remove", action="store_true",
+                        help="Also remove entries missing from the source. "
+                             "Without this, local entries are "
+                             "kept (the source is not official).")
     args = parser.parse_args()
 
     try:
-        source = (json.loads(Path(args.fichier).read_text(encoding="utf-8"))
-                  if args.fichier else telecharge(args.url))
+        source = (json.loads(Path(args.file).read_text(encoding="utf-8"))
+                  if args.file else telecharge(args.url))
         # en_table et la lecture de la table sont DANS le try : une source mal
         # formee produisait sinon une trace au lieu du message prevu.
         nouvelle = en_table(source)
         ancienne = (json.loads(TABLE.read_text(encoding="utf-8"))
                     if TABLE.exists() else {})
     except Exception as exc:  # noqa: BLE001 - reseau, fichier ou format
-        print(f"Recuperation impossible : {exc}", file=sys.stderr)
+        print(f"Could not fetch: {exc}", file=sys.stderr)
         return 1
 
     ajouts, retraits, renommes = compare(ancienne, nouvelle)
-    print(f"table actuelle : {len(ancienne)} vehicules")
-    print(f"liste recuperee : {len(nouvelle)} vehicules")
-    print(f"  + {len(ajouts)} ajout(s)   - {len(retraits)} retrait(s)   "
-          f"~ {len(renommes)} renommage(s)")
+    print(f"current table: {len(ancienne)} vehicles")
+    print(f"fetched list:  {len(nouvelle)} vehicles")
+    print(f"  + {len(ajouts)} added   - {len(retraits)} removed   "
+          f"~ {len(renommes)} renamed")
     for ordinal in ajouts[:10]:
         print(f"  + {ordinal} {nouvelle[ordinal]}")
     for ordinal in retraits[:10]:
@@ -132,29 +136,29 @@ def main() -> int:
         for o in inconnus:
             (resolus if str(o) in nouvelle else restants).append(o)
         if resolus:
-            print(f"\n{len(resolus)} ordinal(aux) rencontres en jeu sont "
-                  f"desormais connus : {resolus}")
+            print(f"\n{len(resolus)} ordinal(s) seen in game are now "
+                  f"known: {resolus}")
         if restants:
-            print(f"{len(restants)} ordinal(aux) rencontres en jeu restent "
-                  f"absents de la liste : {restants}")
+            print(f"{len(restants)} ordinal(s) seen in game are still "
+                  f"missing from the list: {restants}")
 
     # FUSION et non remplacement : la source n'est pas officielle, et un
     # remplacement en bloc annulait les corrections faites a la main.
     resultat = dict(ancienne)
     resultat.update(nouvelle)
-    if args.supprimer:
+    if args.remove:
         for ordinal in retraits:
             resultat.pop(ordinal, None)
     elif retraits:
-        print(f"\n{len(retraits)} entree(s) locale(s) absente(s) de la source "
-              f"sont CONSERVEES (--supprimer pour les retirer).")
+        print(f"\n{len(retraits)} local entr(y/ies) missing from the source "
+              f"are KEPT (--remove to drop them).")
     resultat = dict(sorted(resultat.items(), key=lambda kv: int(kv[0])))
 
-    if not args.ecrire:
-        print("\nApercu seulement. Relancer avec --ecrire pour appliquer.")
+    if not args.write:
+        print("\nPreview only. Re-run with --write to apply.")
         return 0
     if resultat == ancienne:
-        print("\nRien a changer.")
+        print("\nNothing to change.")
         return 0
 
     # Ecriture atomique : `write_text` tronque avant d'ecrire, et un JSON
@@ -164,9 +168,9 @@ def main() -> int:
     temporaire.write_text(json.dumps(resultat, ensure_ascii=False, indent=1),
                           encoding="utf-8")
     os.replace(temporaire, TABLE)
-    print(f"\n{TABLE.name} mis a jour : {len(resultat)} vehicules "
-          f"({len(ajouts)} ajout(s), {len(renommes)} renommage(s)"
-          + (f", {len(retraits)} retrait(s)" if args.supprimer else "") + ").")
+    print(f"\n{TABLE.name} updated: {len(resultat)} vehicles "
+          f"({len(ajouts)} added, {len(renommes)} renamed"
+          + (f", {len(retraits)} removed" if args.remove else "") + ").")
     return 0
 
 

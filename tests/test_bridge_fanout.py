@@ -8,7 +8,7 @@ introduite.
 import socket
 import unittest
 
-from bridge import Bridge, _type_osc
+from bridge import Bridge, _osc_type
 from pythonosc.osc_message_builder import OscMessageBuilder
 from pythonosc.osc_message import OscMessage
 from tests.helpers import OscRecorder, free_port, make_packet, wait_until
@@ -115,7 +115,7 @@ class TestTypeOsc(unittest.TestCase):
     @staticmethod
     def _aller_retour(valeur):
         constructeur = OscMessageBuilder(address="/t")
-        impose = _type_osc(valeur)
+        impose = _osc_type(valeur)
         if impose is None:
             constructeur.add_arg(valeur)
         else:
@@ -125,13 +125,13 @@ class TestTypeOsc(unittest.TestCase):
     def test_entiers_dans_int32_restent_entiers(self):
         for valeur in (0, -1, 100, 2 ** 31 - 1, -(2 ** 31)):
             with self.subTest(valeur=valeur):
-                self.assertIsNone(_type_osc(valeur))
+                self.assertIsNone(_osc_type(valeur))
                 self.assertEqual(self._aller_retour(valeur), valeur)
 
     def test_entiers_hors_int32_gardent_leur_valeur_exacte(self):
         for valeur in (2 ** 31, 3000000007, 4294967295):
             with self.subTest(valeur=valeur):
-                self.assertEqual(_type_osc(valeur),
+                self.assertEqual(_osc_type(valeur),
                                  OscMessageBuilder.ARG_TYPE_DOUBLE)
                 self.assertEqual(self._aller_retour(valeur), valeur,
                                  "un double doit rendre l'entier exact")
@@ -144,8 +144,8 @@ class TestTypeOsc(unittest.TestCase):
         self.assertNotEqual(degrade, 3000000007)
 
     def test_flottants_et_booleens_inchanges(self):
-        self.assertIsNone(_type_osc(3.5))
-        self.assertIsNone(_type_osc(True))
+        self.assertIsNone(_osc_type(3.5))
+        self.assertIsNone(_osc_type(True))
 
 
 class TestPrecisionParLeVraiChemin(FanoutTestCase):
@@ -201,7 +201,7 @@ class TestConstruction(unittest.TestCase):
         self.assertTrue(pont.bound.wait(15))
         pont.join(timeout=3)
         self.assertIsNotNone(pont.error)
-        self.assertIn("joignable", pont.error)
+        self.assertIn("no reachable OSC destination", pont.error)
 
 
 if __name__ == "__main__":

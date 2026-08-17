@@ -168,7 +168,7 @@ class TelemetryWebSocketServer:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         if not self._ready.wait(timeout):
-            self.error = self.error or "delai de demarrage depasse"
+            self.error = self.error or "start-up timed out"
         if self.error is not None or self._loop is None:
             self._thread = None
             return False
@@ -316,7 +316,7 @@ class TelemetryWebSocketServer:
         try:
             # Message d'accueil : schema, unites et cadence, pour qu'un client
             # n'ait pas a coder en dur la liste des canaux.
-            hello = {"type": "hello", "protocol": 1, "source": "forza-td-bridge",
+            hello = {"type": "hello", "protocol": 1, "source": "forza-bridge",
                      "rate_hz": self.rate_hz,
                      # Le client DOIT fusionner les trames partielles quand
                      # ceci vaut true ; les trames completes portent "full".

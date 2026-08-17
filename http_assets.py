@@ -66,12 +66,12 @@ def process_request(connection, request):
 
     target = _resolve(request.path)
     if target is None:
-        return _text_response(404, "Not Found", "Fichier introuvable.")
+        return _text_response(404, "Not Found", "File not found.")
 
     try:
         body = target.read_bytes()
     except OSError:
-        return _text_response(500, "Internal Server Error", "Lecture impossible.")
+        return _text_response(500, "Internal Server Error", "Could not read file.")
 
     headers = Headers({
         "Content-Type": _CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream"),

@@ -25,8 +25,10 @@ from pythonosc.udp_client import SimpleUDPClient
 
 import car_lookup
 import derived_channels
-import osc_targets as osc_targets_mod
 import smoothing
+# Symboles importes directement : le parametre `osc_targets` de Bridge
+# masquerait un import du module homonyme.
+from osc_targets import DEFAULT_TARGET, resolve as resolve_target
 from channel_catalog import ALL_CHANNELS, CATEGORY_OF, UNITS
 from forza_telemetry import parse
 
@@ -40,7 +42,7 @@ WS_CONTEXT_FIELDS = ("engine_max_rpm", "is_race_on")
 _INT32_MIN, _INT32_MAX = -(2 ** 31), 2 ** 31 - 1
 
 
-def _type_osc(value):
+def _osc_type(value):
     """Type OSC a imposer, ou None pour laisser python-osc decider.
 
     python-osc emet `,i` (int32) sous 2^31 et bascule sur `,h` (int64)
@@ -78,7 +80,7 @@ class Bridge(threading.Thread):
                  ws_server=None, osc_clients=None, derived: bool = True,
                  smoothing_settings: dict[str, float] | None = None):
         super().__init__(daemon=True)
-        # Canaux calcules (unites usuelles, grandeurs bornees) ajoutes aux
+        # Canaux calcules (units usuelles, grandeurs bornees) ajoutes aux
         # canaux bruts. Voir derived_channels.py.
         self.derived = derived
         # Lissage applique APRES les derives : on peut ainsi adoucir
@@ -92,15 +94,15 @@ class Bridge(threading.Thread):
         self.ws_server = ws_server
         # Doublons retires : deux fois la meme destination ouvrirait deux
         # sockets et doublerait reellement le trafic vers le meme point.
-        cibles = list(dict.fromkeys(
-            osc_targets if osc_targets is not None else [osc_targets_mod.CIBLE_PAR_DEFAUT]))
-        if osc_clients is None and not cibles:
-            raise ValueError("aucune destination OSC")
-        self._cibles_demandees = cibles
+        targets = list(dict.fromkeys(
+            osc_targets if osc_targets is not None else [DEFAULT_TARGET]))
+        if osc_clients is None and not targets:
+            raise ValueError("no OSC destination")
+        self._requested_targets = targets
 
         # Clients injectables pour les tests. Sinon ils sont construits dans
         # run(), PAS ici : SimpleUDPClient resout le DNS dans son
-        # constructeur, ce qui bloquait le thread appelant (l'interface
+        # builder, ce qui bloquait le thread appelant (l'interface
         # graphique) et faisait remonter socket.gaierror hors de son rappel.
         self.osc_clients = list(osc_clients) if osc_clients is not None else []
         self._clients_fournis = osc_clients is not None
@@ -127,7 +129,7 @@ class Bridge(threading.Thread):
         """Destinations demandees. Derivee, jamais stockee en double :
         l'ancien attribut annoncait la valeur par defaut alors que des
         clients injectes emettaient ailleurs."""
-        return list(self._cibles_demandees)
+        return list(self._requested_targets)
 
     @property
     def car_name(self) -> str:
@@ -141,23 +143,23 @@ class Bridge(threading.Thread):
         for name in WS_CONTEXT_FIELDS:
             if name not in names:
                 names.append(name)
-        unites = {n: UNITS[n] for n in names if n in UNITS}
+        units = {n: UNITS[n] for n in names if n in UNITS}
         categories = {n: CATEGORY_OF[n] for n in names if n in CATEGORY_OF}
 
         # Les canaux lisses portent l'unite et la categorie de leur source.
-        for lisse in self.smoother.canaux_produits:
-            if lisse in names:
+        for smoothed in self.smoother.produced_channels:
+            if smoothed in names:
                 continue
-            names.append(lisse)
-            source = lisse[:-len(smoothing.SUFFIXE)]
+            names.append(smoothed)
+            source = smoothed[:-len(smoothing.SUFFIX)]
             if source in UNITS:
-                unites[lisse] = UNITS[source]
+                units[smoothed] = UNITS[source]
             if source in CATEGORY_OF:
-                categories[lisse] = CATEGORY_OF[source]
+                categories[smoothed] = CATEGORY_OF[source]
 
         return {
             "channels": names,
-            "units": unites,
+            "units": units,
             "categories": categories,
             "car_name": self._car_name,
             "packet_count": self.packet_count,
@@ -166,7 +168,7 @@ class Bridge(threading.Thread):
     def stop(self) -> None:
         self.stop_event.set()
 
-    def _construit_clients(self) -> None:
+    def _build_clients(self) -> None:
         """Resout chaque destination une fois, puis ouvre les sockets.
 
         La resolution est faite ici pour deux raisons : ne pas figer le thread
@@ -175,33 +177,33 @@ class Bridge(threading.Thread):
         repasse la chaine d'origine a `sendto`.
         """
         clients = []
-        for cible in self._cibles_demandees:
+        for target in self._requested_targets:
             try:
-                hote, port = osc_targets_mod.resout(cible)
+                hote, port = resolve_target(target)
             except OSError as exc:
                 # Une destination injoignable ne doit pas empecher les autres
                 # de fonctionner : on la note et on continue.
-                self.osc_failures[cible] = f"resolution impossible: {exc}"
+                self.osc_failures[target] = f"cannot resolve: {exc}"
                 continue
-            clients.append((cible, SimpleUDPClient(hote, port)))
-        self._clients_par_cible = clients
+            clients.append((target, SimpleUDPClient(hote, port)))
+        self._clients_by_target = clients
         self.osc_clients = [client for _, client in clients]
 
     def run(self) -> None:
         if not self._clients_fournis:
-            self._construit_clients()
+            self._build_clients()
             if not self.osc_clients:
-                self.error = ("aucune destination OSC joignable : "
+                self.error = ("no reachable OSC destination: "
                               + " ; ".join(self.osc_failures.values()))
                 self.bound.set()
                 return
         else:
-            # Chaque client doit etre servi, meme si la liste des cibles est
+            # Chaque client doit etre servi, meme si la liste des targets est
             # plus courte : un `zip` tronquerait a la plus courte des deux et
             # les clients au-dela ne recevraient jamais rien.
-            cibles = self._cibles_demandees
-            self._clients_par_cible = [
-                (cibles[indice] if indice < len(cibles) else ("client", indice),
+            targets = self._requested_targets
+            self._clients_by_target = [
+                (targets[indice] if indice < len(targets) else ("client", indice),
                  client)
                 for indice, client in enumerate(self.osc_clients)]
 
@@ -255,7 +257,7 @@ class Bridge(threading.Thread):
                 # Fusionnes aux canaux bruts : tout l'aval (OSC, WebSocket,
                 # interface, accueil) les traite sans rien de particulier.
                 values = {**values, **derived_channels.compute(values)}
-            if self.smoother.actif:
+            if self.smoother.active:
                 values = self.smoother.apply(values, time.monotonic())
             self.latest_values = values
             self.packet_count += 1
@@ -269,8 +271,8 @@ class Bridge(threading.Thread):
                 # Les canaux lisses ne figurent pas au catalogue : les
                 # configurer vaut demande explicite, ils accompagnent donc
                 # toujours la selection.
-                lisses = self.smoother.canaux_produits
-                names = selected if not lisses else selected.union(lisses)
+                smoothed = self.smoother.produced_channels
+                names = selected if not smoothed else selected.union(smoothed)
 
             ordinal = values.get("car_ordinal")
             if ordinal != self._last_ordinal:
@@ -281,12 +283,12 @@ class Bridge(threading.Thread):
                     # Chaine de caracteres : certains recepteurs n'acceptent
                     # que des nombres sur leur entree principale (dans
                     # TouchDesigner par exemple, il faut un OSC In DAT).
-                    self._emet(f"{OSC_ADDRESS_PREFIX}/car_name", self._car_name)
+                    self._emit(f"{OSC_ADDRESS_PREFIX}/car_name", self._car_name)
 
             for name in names:
                 value = values.get(name)
                 if value is not None:
-                    self._emet(f"{OSC_ADDRESS_PREFIX}/{name}", value)
+                    self._emit(f"{OSC_ADDRESS_PREFIX}/{name}", value)
 
             if self.ws_server is not None:
                 # Charge utile construite paresseusement : le serveur limite
@@ -301,7 +303,7 @@ class Bridge(threading.Thread):
             "is_race_on": bool(self.latest_values.get("is_race_on", 0)),
         }
 
-    def _emet(self, adresse: str, valeur) -> None:
+    def _emit(self, address: str, value) -> None:
         """Envoie un message OSC a toutes les destinations.
 
         Le message est encode UNE seule fois : avec plusieurs destinations,
@@ -311,19 +313,19 @@ class Bridge(threading.Thread):
         (console eteinte, lien sature) tuait le thread et arretait aussi
         toutes les autres destinations ET la diffusion WebSocket.
         """
-        constructeur = OscMessageBuilder(address=adresse)
-        type_impose = _type_osc(valeur)
-        if type_impose is None:
-            constructeur.add_arg(valeur)
+        builder = OscMessageBuilder(address=address)
+        forced_type = _osc_type(value)
+        if forced_type is None:
+            builder.add_arg(value)
         else:
-            constructeur.add_arg(float(valeur), arg_type=type_impose)
-        message = constructeur.build()
+            builder.add_arg(float(value), arg_type=forced_type)
+        message = builder.build()
 
-        for cible, client in self._clients_par_cible:
+        for target, client in self._clients_by_target:
             try:
                 client.send(message)
-            except Exception as exc:  # noqa: BLE001 - une cible ne doit pas tout arreter
-                self.osc_failures[cible] = f"{type(exc).__name__}: {exc}"
+            except Exception as exc:  # noqa: BLE001 - une target ne doit pas tout arreter
+                self.osc_failures[target] = f"{type(exc).__name__}: {exc}"
 
     def _ws_payload(self, values: dict, names) -> dict:
         payload = {name: values[name] for name in names if name in values}

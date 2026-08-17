@@ -18,7 +18,7 @@ Format, tel qu'observe :
     disparait purement et simplement de `portsIn`.
 
 Usage :
-    python cables/build_cables_patch.py --gabarit chemin/vers/un_patch.cables
+    python cables/build_cables_patch.py --template chemin/vers/un_patch.cables
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ class Patch:
 
 def construit(url: str, gabarit: dict | None = None) -> dict:
     """Barre laterale affichant vehicule, vitesse et regime moteur."""
-    patch = Patch("Forza telemetrie")
+    patch = Patch("Forza telemetry")
 
     sidebar = patch.ajoute(SIDEBAR, -600, 0, **{"Title": "Forza"})
     # `?full=1` dans l'URL : la passerelle emet en differentiel, or cables
@@ -167,33 +167,33 @@ def construit(url: str, gabarit: dict | None = None) -> dict:
         patch.relie(sidebar, "childs", afficheur, "link")
         patch.relie(source, port, afficheur, "Value")
 
-    ajoute_ligne(0, "Vehicule", "car_name", numerique=False)
-    ajoute_ligne(1, "Vitesse (km/h)", "speed", numerique=True, facteur=3.6)
-    ajoute_ligne(2, "Regime (tr/min)", "current_engine_rpm", numerique=True)
+    ajoute_ligne(0, "Vehicle", "car_name", numerique=False)
+    ajoute_ligne(1, "Speed (km/h)", "speed", numerique=True, facteur=3.6)
+    ajoute_ligne(2, "Engine rpm", "current_engine_rpm", numerique=True)
 
     return patch.rendu(gabarit)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Genere un patch cables.gl branche sur la passerelle Forza")
+        description="Generate a cables.gl patch wired to the Forza bridge")
     parser.add_argument("--url", default="ws://localhost:8765/?full=1",
-                        help="Adresse du serveur WebSocket de la passerelle")
-    parser.add_argument("--sortie", default=None, help="Fichier .cables a ecrire")
-    parser.add_argument("--gabarit", default=None,
-                        help="Patch .cables existant dont reprendre l'identite locale")
+                        help="WebSocket address of the bridge")
+    parser.add_argument("--output", default=None, help=".cables file to write")
+    parser.add_argument("--template", default=None,
+                        help="Existing .cables patch whose local identity to reuse")
     args = parser.parse_args()
 
     gabarit = None
-    if args.gabarit:
-        gabarit = json.loads(Path(args.gabarit).read_text(encoding="utf-8"))
+    if args.template:
+        gabarit = json.loads(Path(args.template).read_text(encoding="utf-8"))
 
-    destination = Path(args.sortie) if args.sortie else \
-        Path(__file__).with_name("forza_telemetrie.cables")
+    destination = Path(args.output) if args.output else \
+        Path(__file__).with_name("forza_telemetry.cables")
     destination.write_text(
         json.dumps(construit(args.url, gabarit), indent=1, ensure_ascii=False),
         encoding="utf-8")
-    print(f"Patch ecrit : {destination}")
+    print(f"Patch written: {destination}")
 
 
 if __name__ == "__main__":

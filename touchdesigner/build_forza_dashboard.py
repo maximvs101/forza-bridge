@@ -32,9 +32,9 @@ def set_fraction_units(target_op, *par_names):
             getattr(target_op.par, name).val = 'fraction'
         except Exception:
             print(
-                f"Attention: impossible de regler {target_op.name}.{name} sur "
-                f"'Fraction' automatiquement - a verifier manuellement dans les "
-                f"parametres du TOP."
+                f"Warning: could not set {target_op.name}.{name} to "
+                f"'Fraction' automatically - check it manually in the "
+                f"TOP parameters."
             )
 
 
@@ -74,7 +74,7 @@ rpm_frac = frac_expr(f"op('{CHOP}')['current_engine_rpm'][0]", f"op('{CHOP}')['e
 make_bar('rpm_bar', rpm_frac, (1.0, 0.4, 0.1), 500)
 make_text('rpm_text', f"f\"{{op('{CHOP}')['current_engine_rpm'][0]:.0f}} tr/min\"", 500, 420)
 
-make_text('gear_text', f"f\"Rapport: {{int(op('{CHOP}')['gear'][0])}}\"", 700, 300, size=36)
+make_text('gear_text', f"f\"Gear: {{int(op('{CHOP}')['gear'][0])}}\"", 700, 300, size=36)
 
 # -- G-meter : cadre fixe + point mobile, composites ensemble --
 gforce_track = comp.create(rectangleTOP, 'gforce_track')
@@ -104,6 +104,6 @@ gforce_view.inputConnectors[0].connect(gforce_dot)
 gforce_view.inputConnectors[1].connect(gforce_track)
 
 print(
-    "Tableau de bord cree : speed_bar/speed_text, rpm_bar/rpm_text, "
-    "gear_text, gforce_view (cadre + point G)."
+    "Dashboard created: speed_bar/speed_text, rpm_bar/rpm_text, "
+    "gear_text, gforce_view (frame + G dot)."
 )

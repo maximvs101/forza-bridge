@@ -32,9 +32,9 @@ import math
 # deux rapports de boite donnerait 2,7, et entre deux identifiants de vehicule
 # un numero qui n'existe pas.
 # Suffixe des canaux lisses. Le canal d'origine reste intact.
-SUFFIXE = "_smooth"
+SUFFIX = "_smooth"
 
-NON_LISSABLES = frozenset({
+NOT_SMOOTHABLE = frozenset({
     "is_race_on", "timestamp_ms", "gear", "lap_number", "race_position",
     "car_ordinal", "car_class", "car_performance_index", "drivetrain_type",
     "num_cylinders", "car_category", "horizon_unknown_1", "horizon_unknown_2",
@@ -44,14 +44,14 @@ NON_LISSABLES = frozenset({
 })
 
 
-def parse_reglages(texte: str) -> dict[str, float]:
+def parse_settings(texte: str) -> dict[str, float]:
     """Lit une specification "canal=duree, canal=duree".
 
     Exemple : "speed_kmh=0.15, slip_max=0.05". Les entrees invalides ou
     portant sur un canal non lissable sont ignorees en silence : ce texte
     vient d'un champ de saisie ou d'une ligne de commande.
     """
-    reglages: dict[str, float] = {}
+    settings: dict[str, float] = {}
     for morceau in texte.replace(";", ",").split(","):
         morceau = morceau.strip()
         if not morceau or "=" not in morceau:
@@ -62,43 +62,43 @@ def parse_reglages(texte: str) -> dict[str, float]:
             tau = float(valeur.strip())
         except ValueError:
             continue
-        if nom and tau > 0 and nom not in NON_LISSABLES:
-            reglages[nom] = tau
-    return reglages
+        if nom and tau > 0 and nom not in NOT_SMOOTHABLE:
+            settings[nom] = tau
+    return settings
 
 
-def formate_reglages(reglages: dict[str, float]) -> str:
-    return ", ".join(f"{nom}={tau:g}" for nom, tau in sorted(reglages.items()))
+def format_settings(settings: dict[str, float]) -> str:
+    return ", ".join(f"{nom}={tau:g}" for nom, tau in sorted(settings.items()))
 
 
 class Smoother:
     """Applique un lissage par canal a des trames successives."""
 
-    def __init__(self, reglages: dict[str, float] | None = None):
-        self._reglages: dict[str, float] = {}
-        self._etat: dict[str, float] = {}
-        self._dernier_instant: float | None = None
-        self.configure(reglages or {})
+    def __init__(self, settings: dict[str, float] | None = None):
+        self._settings: dict[str, float] = {}
+        self._state: dict[str, float] = {}
+        self._last_time: float | None = None
+        self.configure(settings or {})
 
-    def configure(self, reglages: dict[str, float]) -> None:
-        """Remplace les reglages. Les canaux retires repartent a zero."""
-        self._reglages = {nom: tau for nom, tau in reglages.items()
-                          if tau > 0 and nom not in NON_LISSABLES}
-        self._etat = {nom: valeur for nom, valeur in self._etat.items()
-                      if nom in self._reglages}
-
-    @property
-    def reglages(self) -> dict[str, float]:
-        return dict(self._reglages)
+    def configure(self, settings: dict[str, float]) -> None:
+        """Remplace les settings. Les canaux retires repartent a zero."""
+        self._settings = {nom: tau for nom, tau in settings.items()
+                          if tau > 0 and nom not in NOT_SMOOTHABLE}
+        self._state = {nom: valeur for nom, valeur in self._state.items()
+                      if nom in self._settings}
 
     @property
-    def actif(self) -> bool:
-        return bool(self._reglages)
+    def settings(self) -> dict[str, float]:
+        return dict(self._settings)
 
     @property
-    def canaux_produits(self) -> list[str]:
+    def active(self) -> bool:
+        return bool(self._settings)
+
+    @property
+    def produced_channels(self) -> list[str]:
         """Noms des canaux lisses publies, en plus des canaux d'origine."""
-        return [nom + SUFFIXE for nom in sorted(self._reglages)]
+        return [nom + SUFFIX for nom in sorted(self._settings)]
 
     def reset(self) -> None:
         """Oublie l'etat courant.
@@ -107,25 +107,25 @@ class Smoother:
         apres une interruption — pour que la sortie parte de la nouvelle
         valeur au lieu d'y glisser depuis l'ancienne.
         """
-        self._etat.clear()
-        self._dernier_instant = None
+        self._state.clear()
+        self._last_time = None
 
-    def apply(self, values: dict, instant: float) -> dict:
+    def apply(self, values: dict, now: float) -> dict:
         """Renvoie la trame enrichie des canaux `<nom>_smooth`.
 
         Les valeurs d'origine ne sont jamais modifiees. `instant` est une
         horloge monotone.
         """
-        if not self._reglages:
+        if not self._settings:
             return values
 
         ecart = None
-        if self._dernier_instant is not None:
-            ecart = instant - self._dernier_instant
-        self._dernier_instant = instant
+        if self._last_time is not None:
+            ecart = now - self._last_time
+        self._last_time = now
 
         sortie = dict(values)
-        for nom, tau in self._reglages.items():
+        for nom, tau in self._settings.items():
             brut = values.get(nom)
             if not isinstance(brut, (int, float)) or isinstance(brut, bool):
                 continue
@@ -135,18 +135,18 @@ class Smoother:
             if not math.isfinite(brut):
                 continue
 
-            precedent = self._etat.get(nom)
+            precedent = self._state.get(nom)
             # Premiere valeur, ou ecart de temps inutilisable : on adopte la
             # valeur telle quelle plutot que de partir de zero, ce qui
             # produirait une rampe visible au demarrage.
             if precedent is None or ecart is None or ecart <= 0:
-                self._etat[nom] = brut
-                sortie[nom + SUFFIXE] = brut
+                self._state[nom] = brut
+                sortie[nom + SUFFIX] = brut
                 continue
 
             coefficient = 1.0 - math.exp(-ecart / tau)
             lisse = precedent + coefficient * (brut - precedent)
-            self._etat[nom] = lisse
-            sortie[nom + SUFFIXE] = lisse
+            self._state[nom] = lisse
+            sortie[nom + SUFFIX] = lisse
 
         return sortie
