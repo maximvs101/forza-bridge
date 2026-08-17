@@ -659,6 +659,12 @@ class BridgeGUI:
         if bridge.osc_failures:
             parts.append("FAILED: " + ", ".join(
                 osc_targets.format_target(t) for t in bridge.osc_failures))
+        # Paquets recus mais illisibles : sans ce rappel, l'interface annonce
+        # "no packets from the game" alors que le jeu emet une variante que
+        # nous ne savons pas decoder.
+        refuses = bridge.rejected_summary()
+        if refuses:
+            parts.append(refuses)
         return "  |  ".join(parts)
 
     def _refresh_vehicle(self, values: dict) -> None:

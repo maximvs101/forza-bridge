@@ -4,10 +4,18 @@ Format "Horizon Dash" (sled + extension Horizon + dash), tel qu'utilise
 par FH4/FH5 et repris par FH6. Reference: FH4_packetformat.dat
 (projet richstokes/Forza-data-tools) + doc officielle Forza Support.
 
-Trois tailles de paquet sont acceptees :
+Tailles de paquet acceptees :
   - 232 octets : "sled" seul (rare, generalement desactive dans les options)
   - 323 octets : "dash" Horizon complet
-  - 324 octets : "dash" Horizon + 1 octet de fin (paquets recents)
+  - 324 octets : "dash" Horizon + 1 octet de fin — MESURE sur FH6 (aout 2026,
+    2701 paquets consecutifs, tous a 324)
+  - 339 / 340 octets : "dash" + usure des quatre pneus
+
+Toute autre taille est refusee, et c'est volontaire : un `>=` decodait
+n'importe quel datagramme etranger de 323 octets ou plus en flottants
+aberrants, aussitot diffuses en OSC. Le pont COMPTE les paquets refuses et
+affiche leur taille (voir `Bridge.rejected_count`) : une variante inconnue
+produit donc un diagnostic, jamais un silence.
 """
 
 from __future__ import annotations
@@ -62,17 +70,43 @@ _DASH_FIELDS = [
     ("steer", "b"), ("norm_driving_line", "b"), ("norm_ai_brake_difference", "b"),
 ]
 
+# Usure des pneus, publiee apres la partie dash. Releve dans un parseur FH6
+# independant (TheBanHammer/fh6-tel, src-tauri/src/parser.rs) : quatre
+# flottants aux offsets 323, 327, 331 et 335, soit 339 octets en tout.
+# NON MESURE ICI : le flux de la machine de developpement est a 324 octets,
+# donc sans ces champs. Si l'offset etait faux, les valeurs seraient
+# manifestement aberrantes plutot que silencieusement fausses — et le compteur
+# de paquets refuses signale toute autre taille.
+_TIRE_WEAR_FIELDS = [
+    ("tire_wear_fl", "f"), ("tire_wear_fr", "f"),
+    ("tire_wear_rl", "f"), ("tire_wear_rr", "f"),
+]
+
 _SLED_ONLY = _SLED_FIELDS
 _HORIZON_DASH = _SLED_FIELDS + _HORIZON_EXTRA_FIELDS + _DASH_FIELDS
+_HORIZON_DASH_WEAR = _HORIZON_DASH + _TIRE_WEAR_FIELDS
 
 _SLED_FORMAT = "<" + "".join(t for _, t in _SLED_ONLY)
 _HORIZON_DASH_FORMAT = "<" + "".join(t for _, t in _HORIZON_DASH)
+_HORIZON_DASH_WEAR_FORMAT = "<" + "".join(t for _, t in _HORIZON_DASH_WEAR)
 
 SLED_SIZE = struct.calcsize(_SLED_FORMAT)          # 232
 HORIZON_DASH_SIZE = struct.calcsize(_HORIZON_DASH_FORMAT)  # 323 (+1 octet parfois)
+HORIZON_WEAR_SIZE = struct.calcsize(_HORIZON_DASH_WEAR_FORMAT)  # 339
 
 assert SLED_SIZE == 232
 assert HORIZON_DASH_SIZE == 323
+assert HORIZON_WEAR_SIZE == 339
+
+# Une seule source de verite, pour l'interface comme pour les tests : un
+# message qui enumere les tailles doit enumerer CELLES-CI.
+ACCEPTED_SIZES: frozenset[int] = frozenset({
+    SLED_SIZE,
+    HORIZON_DASH_SIZE, HORIZON_DASH_SIZE + 1,
+    HORIZON_WEAR_SIZE, HORIZON_WEAR_SIZE + 1,
+})
+
+TIRE_WEAR_CHANNELS: tuple[str, ...] = tuple(nom for nom, _ in _TIRE_WEAR_FIELDS)
 
 
 @dataclass
@@ -89,7 +123,9 @@ def parse(packet: bytes) -> TelemetryFrame | None:
     # datagramme etranger de 323 octets ou plus (bavardage reseau, autre jeu)
     # et le decodait en flottants aberrants, aussitot diffuses en OSC.
     # Mesure sur FH6 (aout 2026) : les paquets font 324 octets.
-    if n in (HORIZON_DASH_SIZE, HORIZON_DASH_SIZE + 1):
+    if n in (HORIZON_WEAR_SIZE, HORIZON_WEAR_SIZE + 1):
+        fields, fmt = _HORIZON_DASH_WEAR, _HORIZON_DASH_WEAR_FORMAT
+    elif n in (HORIZON_DASH_SIZE, HORIZON_DASH_SIZE + 1):
         fields, fmt = _HORIZON_DASH, _HORIZON_DASH_FORMAT
     elif n == SLED_SIZE:
         fields, fmt = _SLED_ONLY, _SLED_FORMAT

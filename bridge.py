@@ -30,7 +30,7 @@ import smoothing
 # masquerait un import du module homonyme.
 from osc_targets import DEFAULT_TARGET, resolve as resolve_target
 from channel_catalog import ALL_CHANNELS, CATEGORY_OF, UNITS
-from forza_telemetry import parse
+from forza_telemetry import ACCEPTED_SIZES, parse
 
 OSC_ADDRESS_PREFIX = "/forza"
 
@@ -114,6 +114,14 @@ class Bridge(threading.Thread):
         self.latest_values: dict[str, float] = {}
         self.packet_count = 0
         self.error: str | None = None
+
+        # Paquets recus mais refuses par le decodeur, avec leurs tailles. Sans
+        # ce compteur, une variante de paquet inconnue (le jeu peut publier
+        # l'usure des pneus, ce qui change la taille) donnait un silence
+        # complet : l'interface affichait "No packets from the game" alors que
+        # les paquets arrivaient. Une taille affichee est un diagnostic.
+        self.rejected_count = 0
+        self.rejected_sizes: dict[int, int] = {}
 
         self._last_ordinal: int | None = None
         self._car_name: str = "-"
@@ -241,6 +249,12 @@ class Bridge(threading.Thread):
 
             frame = parse(packet)
             if frame is None:
+                # Compte et retient la taille : c'est la seule information qui
+                # permette de distinguer "le jeu n'emet pas" de "le jeu emet
+                # une variante que nous ne savons pas lire".
+                self.rejected_count += 1
+                taille = len(packet)
+                self.rejected_sizes[taille] = self.rejected_sizes.get(taille, 0) + 1
                 continue
 
             # Signale l'activite AVANT le filtre "seulement en course" : sinon,
@@ -295,13 +309,33 @@ class Bridge(threading.Thread):
                 # la cadence et n'appellera cette fabrique que s'il emet.
                 self.ws_server.publish(lambda: self._ws_payload(values, names))
 
+    def rejected_summary(self) -> str | None:
+        """Phrase a afficher quand des paquets ont ete refuses, sinon None.
+
+        Une taille inconnue n'est pas une anomalie a taire : c'est exactement
+        ce qu'il faut savoir pour comprendre pourquoi rien n'arrive.
+        """
+        if not self.rejected_count:
+            return None
+        tailles = sorted(self.rejected_sizes.items(),
+                         key=lambda kv: kv[1], reverse=True)
+        detail = ", ".join(f"{taille} B" for taille, _ in tailles[:3])
+        return (f"{self.rejected_count} packet(s) of unsupported size "
+                f"({detail}); expected {sorted(ACCEPTED_SIZES)}")
+
     def status(self) -> dict:
         """Complement du pont a la trame d'etat periodique du serveur."""
-        return {
+        etat = {
             "packets": self.packet_count,
             "car_name": self._car_name,
             "is_race_on": bool(self.latest_values.get("is_race_on", 0)),
         }
+        # Champs absents quand tout va bien : un client n'a pas a filtrer des
+        # zeros pour savoir s'il y a un probleme.
+        if self.rejected_count:
+            etat["rejected"] = self.rejected_count
+            etat["rejected_sizes"] = dict(self.rejected_sizes)
+        return etat
 
     def _emit(self, address: str, value) -> None:
         """Envoie un message OSC a toutes les destinations.

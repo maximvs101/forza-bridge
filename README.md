@@ -5,7 +5,7 @@ that speaks **OSC** or **WebSocket**: visual creation (TouchDesigner,
 cables.gl, vvvv), lighting (QLC+, Chataigne), sound (SuperCollider, Pure Data,
 Sonic Pi, VCV Rack), streaming overlays.
 
-The bridge listens to the game's "Data Out" stream, decodes the 88 packet
+The bridge listens to the game's "Data Out" stream, decodes the 92 packet
 fields, computes 20 more already scaled for use, and rebroadcasts everything.
 
 ## Quick start
@@ -31,8 +31,20 @@ frame rate rather than the protocol. Measured on the same machine: 30 Hz and
 60 Hz while driving depending on load, 60 Hz when stationary.
 
 The "Horizon Dash" format is **323 bytes**, plus a trailing byte on recent
-packets — that is what FH6 sends today (**324**). Both are accepted, as is the
-"sled" format on its own (232).
+packets — that is what FH6 sends today (**324**, measured over 2701 consecutive
+packets). Also accepted: the "sled" format on its own (232), and **339/340
+bytes**, which carry the four tyre-wear floats after the dash block.
+
+Any other size is **refused, and counted**. The refusal is deliberate: a `>=`
+test decoded any foreign 323-byte-or-longer datagram into nonsense floats that
+went straight out over OSC. But a silent refusal is worse — the interface would
+report "no packets from the game" while packets were arriving. So the bridge
+reports the sizes it dropped, in the status bar, on the command line, and in
+the WebSocket `status` frame:
+
+```
+Warning: 4 packet(s) of unsupported size (500 B, 331 B); expected [232, 323, 324, 339, 340]
+```
 
 The game sends from the machine's network address, not from `127.0.0.1`, so
 the bridge listens on `0.0.0.0`.
@@ -94,8 +106,15 @@ Three message types:
 
 ## Channels
 
-**88 raw channels** decoded from the packet, plus **20 computed channels**.
+**92 raw channels** decoded from the packet, plus **20 computed channels**.
 Raw channels are never replaced: everything is added.
+
+Four of the raw ones — `tire_wear_fl/fr/rl/rr` — exist only in 339-byte
+packets. Their offsets (323, 327, 331, 335) come from an independent FH6
+parser, not from a measurement here: the stream measured on the development
+machine is 324 bytes, so those fields are absent and their rows stay empty.
+A wrong offset would show up as visibly absurd values rather than as quiet
+corruption.
 
 | Computed | From | Unit |
 |---|---|---|
@@ -161,7 +180,7 @@ smoothed: averaging two gears would give 2.7.
 Settings are grouped by role — **Input**, **OSC output**, **WebSocket
 output** — rather than stacked in one block.
 
-The channel table lists all 108 channels with their category, unit, live
+The channel table lists all 112 channels with their category, unit, live
 value and smoothing. Clicking the **Send** column toggles a channel; the rest
 of the row selects it, so several channels can be picked at once (Space
 toggles the selection). **Filter** plus the **Filtered** button is the usual

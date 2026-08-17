@@ -52,6 +52,8 @@ CATEGORIES = {
         "tire_slip_angle_fl", "tire_slip_angle_fr", "tire_slip_angle_rl", "tire_slip_angle_rr",
         "tire_combined_slip_fl", "tire_combined_slip_fr", "tire_combined_slip_rl", "tire_combined_slip_rr",
         "tire_temp_fl", "tire_temp_fr", "tire_temp_rl", "tire_temp_rr",
+        # Uniquement dans les paquets de 339 octets (usure des pneus).
+        "tire_wear_fl", "tire_wear_fr", "tire_wear_rl", "tire_wear_rr",
         "wheel_rotation_speed_fl", "wheel_rotation_speed_fr",
         "wheel_rotation_speed_rl", "wheel_rotation_speed_rr",
         "wheel_on_rumble_strip_fl", "wheel_on_rumble_strip_fr",

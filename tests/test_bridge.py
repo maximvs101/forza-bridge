@@ -7,6 +7,7 @@ import unittest
 
 from bridge import Bridge
 from channel_catalog import ALL_CHANNELS, RAW_CHANNELS
+from forza_telemetry import TIRE_WEAR_CHANNELS
 from tests.helpers import OscRecorder, free_port, make_packet, wait_until
 
 
@@ -49,21 +50,29 @@ class TestEmission(BridgeTestCase):
         self.assertEqual(mesures, {"/forza/speed", "/forza/gear"})
 
     def test_selection_none_envoie_tout(self):
-        """Canaux bruts ET derives, ces derniers etant calcules par le pont."""
+        """Canaux bruts ET derives, ces derniers etant calcules par le pont.
+
+        Les canaux d'usure des pneus n'existent que dans les paquets de 339
+        octets : un paquet de 324 ne doit PAS les faire apparaitre, sinon le
+        pont emettrait des valeurs qu'il n'a pas recues.
+        """
         self.demarre(selected_channels=None)
         envoie(self.port, make_packet(speed=30.0))
-        attendu = len(ALL_CHANNELS)
+        attendu = len(ALL_CHANNELS) - len(TIRE_WEAR_CHANNELS)
         wait_until(lambda: len(self.recorder.addresses) >= attendu)
         mesures = {a for a in self.recorder.addresses if a != "/forza/car_name"}
         self.assertEqual(len(mesures), attendu)
         self.assertIn("/forza/speed_kmh", mesures)
+        for canal in TIRE_WEAR_CHANNELS:
+            self.assertNotIn(f"/forza/{canal}", mesures)
 
     def test_derives_desactivables(self):
         self.demarre(selected_channels=None, derived=False)
         envoie(self.port, make_packet(speed=30.0))
-        wait_until(lambda: len(self.recorder.addresses) >= len(RAW_CHANNELS))
+        attendu = len(RAW_CHANNELS) - len(TIRE_WEAR_CHANNELS)
+        wait_until(lambda: len(self.recorder.addresses) >= attendu)
         mesures = {a for a in self.recorder.addresses if a != "/forza/car_name"}
-        self.assertEqual(len(mesures), len(RAW_CHANNELS))
+        self.assertEqual(len(mesures), attendu)
         self.assertNotIn("/forza/speed_kmh", mesures)
 
     def test_nom_de_vehicule_emis_une_seule_fois(self):

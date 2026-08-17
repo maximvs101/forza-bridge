@@ -75,6 +75,7 @@ def run(listen_host: str, listen_port: int, targets: list[tuple[str, int]],
     print("Press Ctrl+C to stop.\n")
 
     last_car = None
+    last_rejected = 0
     try:
         while bridge.is_alive():
             time.sleep(0.25)
@@ -92,6 +93,14 @@ def run(listen_host: str, listen_port: int, targets: list[tuple[str, int]],
                 line += (" | OSC FAILED: " + ", ".join(
                     osc_targets.format_target(t) for t in bridge.osc_failures))
             print(line, end="", flush=True)
+
+            # Sur une ligne a part, et une seule fois par palier : la ligne de
+            # compteurs est reecrite en place, un avertissement noye dedans
+            # passerait inapercu.
+            refuses = bridge.rejected_summary()
+            if refuses and bridge.rejected_count > last_rejected * 2:
+                last_rejected = bridge.rejected_count
+                print(f"\nWarning: {refuses}", file=sys.stderr)
 
         # Sortie de boucle sans demande d'arret = le thread est mort seul.
         if bridge.error:

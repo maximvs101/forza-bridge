@@ -41,6 +41,10 @@ CATEGORIES: dict[str, list[str]] = {
         "tire_slip_angle_fl", "tire_slip_angle_fr", "tire_slip_angle_rl", "tire_slip_angle_rr",
         "tire_combined_slip_fl", "tire_combined_slip_fr", "tire_combined_slip_rl", "tire_combined_slip_rr",
         "tire_temp_fl", "tire_temp_fr", "tire_temp_rl", "tire_temp_rr",
+        # Presents seulement dans les paquets de 339 octets : absents du flux
+        # mesure (324 octets), donc leur ligne reste vide dans l'interface
+        # tant que le jeu ne les envoie pas.
+        "tire_wear_fl", "tire_wear_fr", "tire_wear_rl", "tire_wear_rr",
         "wheel_rotation_speed_fl", "wheel_rotation_speed_fr",
         "wheel_rotation_speed_rl", "wheel_rotation_speed_rr",
         "wheel_on_rumble_strip_fl", "wheel_on_rumble_strip_fr",
@@ -95,6 +99,10 @@ UNITS: dict[str, str] = {
     "current_lap_time": "s", "current_race_time": "s",
     "tire_temp_fl": "degF", "tire_temp_fr": "degF",
     "tire_temp_rl": "degF", "tire_temp_rr": "degF",
+    "tire_wear_fl": "0-1 (339-byte packets only)",
+    "tire_wear_fr": "0-1 (339-byte packets only)",
+    "tire_wear_rl": "0-1 (339-byte packets only)",
+    "tire_wear_rr": "0-1 (339-byte packets only)",
     "suspension_travel_meters_fl": "m", "suspension_travel_meters_fr": "m",
     "suspension_travel_meters_rl": "m", "suspension_travel_meters_rr": "m",
     "wheel_rotation_speed_fl": "rad/s", "wheel_rotation_speed_fr": "rad/s",

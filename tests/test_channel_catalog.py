@@ -11,9 +11,12 @@ from pathlib import Path
 from channel_catalog import (ALL_CHANNELS, CATEGORIES, CATEGORY_OF,
                              DEFAULT_SELECTION, RAW_CHANNELS, UNITS)
 from derived_channels import DERIVED_CHANNELS
-from forza_telemetry import _HORIZON_DASH
+from forza_telemetry import _HORIZON_DASH_WEAR
 
-CHAMPS_DECODES = [name for name, _ in _HORIZON_DASH]
+# Reference = la variante de paquet la PLUS LARGE (dash + usure des pneus).
+# Prendre la variante courte laisserait les quatre canaux d'usure passer pour
+# des canaux fantomes alors qu'ils sont bel et bien decodes, a 339 octets.
+CHAMPS_DECODES = [name for name, _ in _HORIZON_DASH_WEAR]
 
 BUILDER_TD = (Path(__file__).resolve().parents[1]
               / "touchdesigner" / "build_forza_bridge_component.py")
