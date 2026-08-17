@@ -1,11 +1,41 @@
 """Correspondance ordinal -> vehicule et libelles d'enumerations."""
 
+import pathlib
 import unittest
 
 import car_lookup
 
 
-class TestCarName(unittest.TestCase):
+class BaseJournalIsole(unittest.TestCase):
+    """Redirige le journal des inconnus vers un fichier jetable.
+
+    `describe()` a un effet de bord : sans cette isolation, la suite de tests
+    inscrivait un ordinal fictif dans le vrai car_ordinals_unknown.json, que
+    l'outil de mise a jour rapportait ensuite comme une observation reelle
+    en jeu.
+    """
+
+    def setUp(self):
+        self._sauvegarde = set(car_lookup._inconnus)
+        self._charges = car_lookup._inconnus_charges
+        car_lookup._inconnus.clear()
+        car_lookup._inconnus_charges = True  # evite de relire le vrai fichier
+        self._fichier = car_lookup.UNKNOWN_PATH
+        jetable = pathlib.Path(__file__).with_name("_inconnus_test.json")
+        car_lookup.UNKNOWN_PATH = jetable
+        car_lookup._UNKNOWN_PATH = jetable
+
+    def tearDown(self):
+        if car_lookup._UNKNOWN_PATH.exists():
+            car_lookup._UNKNOWN_PATH.unlink()
+        car_lookup.UNKNOWN_PATH = self._fichier
+        car_lookup._UNKNOWN_PATH = self._fichier
+        car_lookup._inconnus.clear()
+        car_lookup._inconnus.update(self._sauvegarde)
+        car_lookup._inconnus_charges = self._charges
+
+
+class TestCarName(BaseJournalIsole):
     def test_ordinal_connu(self):
         self.assertEqual(car_lookup.car_name(292), "2003 Porsche Carrera GT")
         self.assertEqual(car_lookup.car_name(249), "1964 Ferrari 250 GTO")
@@ -31,23 +61,10 @@ class TestCarName(unittest.TestCase):
         self.assertGreater(car_lookup.known_count(), 600)
 
 
-class TestOrdinauxInconnus(unittest.TestCase):
+class TestOrdinauxInconnus(BaseJournalIsole):
     """La table vient d'une liste communautaire figee : les voitures ajoutees
     par les mises a jour du jeu y manquent forcement. Les retenir evite de
     decouvrir le manque par hasard."""
-
-    def setUp(self):
-        self._sauvegarde = set(car_lookup._inconnus)
-        car_lookup._inconnus.clear()
-        self._fichier = car_lookup._UNKNOWN_PATH
-        car_lookup._UNKNOWN_PATH = self._fichier.with_name("_inconnus_test.json")
-
-    def tearDown(self):
-        if car_lookup._UNKNOWN_PATH.exists():
-            car_lookup._UNKNOWN_PATH.unlink()
-        car_lookup._UNKNOWN_PATH = self._fichier
-        car_lookup._inconnus.clear()
-        car_lookup._inconnus.update(self._sauvegarde)
 
     def test_ordinal_inconnu_retenu(self):
         car_lookup.describe(987001)
@@ -75,8 +92,24 @@ class TestOrdinauxInconnus(unittest.TestCase):
             car_lookup.describe(987003)
         self.assertEqual(car_lookup.unknown_seen(), [987003])
 
-    def test_rechargement_de_la_table(self):
-        self.assertEqual(car_lookup.reload_table(), car_lookup.known_count())
+    def test_journal_existant_repris(self):
+        """Le fichier etait en ecriture seule : le premier inconnu d'une
+        nouvelle session ecrasait tout l'historique."""
+        import json
+        car_lookup._UNKNOWN_PATH.write_text(json.dumps([111111, 222222]),
+                                            encoding="utf-8")
+        car_lookup._inconnus.clear()
+        car_lookup._inconnus_charges = False
+
+        car_lookup.describe(333333)
+        self.assertEqual(json.loads(car_lookup._UNKNOWN_PATH.read_text(encoding="utf-8")),
+                         [111111, 222222, 333333])
+
+    def test_ecriture_atomique(self):
+        """Aucun fichier temporaire ne doit subsister."""
+        car_lookup.describe(444444)
+        residus = list(car_lookup._UNKNOWN_PATH.parent.glob("*.tmp"))
+        self.assertEqual(residus, [])
 
 
 class TestLibelles(unittest.TestCase):

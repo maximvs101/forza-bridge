@@ -25,6 +25,7 @@ from pythonosc.udp_client import SimpleUDPClient
 
 import car_lookup
 import derived_channels
+import osc_targets as osc_targets_mod
 import smoothing
 from channel_catalog import ALL_CHANNELS, CATEGORY_OF, UNITS
 from forza_telemetry import parse
@@ -39,19 +40,25 @@ WS_CONTEXT_FIELDS = ("engine_max_rpm", "is_race_on")
 _INT32_MIN, _INT32_MAX = -(2 ** 31), 2 ** 31 - 1
 
 
-def _osc_safe(value):
-    """Evite qu'un entier non signe 32 bits change l'etiquette de type OSC.
+def _type_osc(value):
+    """Type OSC a imposer, ou None pour laisser python-osc decider.
 
     python-osc emet `,i` (int32) sous 2^31 et bascule sur `,h` (int64)
     au-dela. Tous les recepteurs ne decodent pas `h` de facon fiable — l'OSC
     In CHOP de TouchDesigner, par exemple, laisse alors le canal cesser de se
     mettre a jour sans erreur. `timestamp_ms` franchit ce seuil apres
     ~24,8 jours de fonctionnement.
-    Un float64 represente exactement tout entier jusqu'a 2^53.
+
+    On force alors le type `d` (double, 64 bits). Convertir en `float` sans
+    plus de precaution ne suffit PAS : python-osc encode tout flottant
+    Python en `f`, soit 32 bits, et 3000000007 arrivait a 3000000000 —
+    le remede etait pire que le mal, avec un compteur de millisecondes
+    quantifie par paliers de 128 a 256 ms.
     """
-    if isinstance(value, int) and not (_INT32_MIN <= value <= _INT32_MAX):
-        return float(value)
-    return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        if not (_INT32_MIN <= value <= _INT32_MAX):
+            return OscMessageBuilder.ARG_TYPE_DOUBLE
+    return None
 
 
 class Bridge(threading.Thread):
@@ -83,11 +90,22 @@ class Bridge(threading.Thread):
         self.only_racing = only_racing
         self.send_car_name = send_car_name
         self.ws_server = ws_server
-        # Injectables pour les tests : construire puis remplacer laissait une
-        # socket UDP ouverte derriere soi.
-        self.osc_targets = list(osc_targets or [("127.0.0.1", 7000)])
-        self.osc_clients = list(osc_clients) if osc_clients is not None else [
-            SimpleUDPClient(hote, port) for hote, port in self.osc_targets]
+        # Doublons retires : deux fois la meme destination ouvrirait deux
+        # sockets et doublerait reellement le trafic vers le meme point.
+        cibles = list(dict.fromkeys(
+            osc_targets if osc_targets is not None else [osc_targets_mod.CIBLE_PAR_DEFAUT]))
+        if osc_clients is None and not cibles:
+            raise ValueError("aucune destination OSC")
+        self._cibles_demandees = cibles
+
+        # Clients injectables pour les tests. Sinon ils sont construits dans
+        # run(), PAS ici : SimpleUDPClient resout le DNS dans son
+        # constructeur, ce qui bloquait le thread appelant (l'interface
+        # graphique) et faisait remonter socket.gaierror hors de son rappel.
+        self.osc_clients = list(osc_clients) if osc_clients is not None else []
+        self._clients_fournis = osc_clients is not None
+        # Destination -> derniere erreur rencontree, pour l'affichage.
+        self.osc_failures: dict[tuple[str, int], str] = {}
 
         self.stop_event = threading.Event()
         self.bound = threading.Event()  # arme apres la tentative de bind
@@ -103,6 +121,13 @@ class Bridge(threading.Thread):
         if ws_server is not None:
             ws_server.hello_factory = self.hello
             ws_server.status_factory = self.status
+
+    @property
+    def osc_targets(self) -> list[tuple[str, int]]:
+        """Destinations demandees. Derivee, jamais stockee en double :
+        l'ancien attribut annoncait la valeur par defaut alors que des
+        clients injectes emettaient ailleurs."""
+        return list(self._cibles_demandees)
 
     @property
     def car_name(self) -> str:
@@ -141,7 +166,45 @@ class Bridge(threading.Thread):
     def stop(self) -> None:
         self.stop_event.set()
 
+    def _construit_clients(self) -> None:
+        """Resout chaque destination une fois, puis ouvre les sockets.
+
+        La resolution est faite ici pour deux raisons : ne pas figer le thread
+        appelant, et surtout ne pas laisser python-osc re-resoudre le nom a
+        chaque datagramme — il jette le resultat de sa propre resolution et
+        repasse la chaine d'origine a `sendto`.
+        """
+        clients = []
+        for cible in self._cibles_demandees:
+            try:
+                hote, port = osc_targets_mod.resout(cible)
+            except OSError as exc:
+                # Une destination injoignable ne doit pas empecher les autres
+                # de fonctionner : on la note et on continue.
+                self.osc_failures[cible] = f"resolution impossible: {exc}"
+                continue
+            clients.append((cible, SimpleUDPClient(hote, port)))
+        self._clients_par_cible = clients
+        self.osc_clients = [client for _, client in clients]
+
     def run(self) -> None:
+        if not self._clients_fournis:
+            self._construit_clients()
+            if not self.osc_clients:
+                self.error = ("aucune destination OSC joignable : "
+                              + " ; ".join(self.osc_failures.values()))
+                self.bound.set()
+                return
+        else:
+            # Chaque client doit etre servi, meme si la liste des cibles est
+            # plus courte : un `zip` tronquerait a la plus courte des deux et
+            # les clients au-dela ne recevraient jamais rien.
+            cibles = self._cibles_demandees
+            self._clients_par_cible = [
+                (cibles[indice] if indice < len(cibles) else ("client", indice),
+                 client)
+                for indice, client in enumerate(self.osc_clients)]
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             sock.bind((self.listen_host, self.listen_port))
@@ -223,7 +286,7 @@ class Bridge(threading.Thread):
             for name in names:
                 value = values.get(name)
                 if value is not None:
-                    self._emet(f"{OSC_ADDRESS_PREFIX}/{name}", _osc_safe(value))
+                    self._emet(f"{OSC_ADDRESS_PREFIX}/{name}", value)
 
             if self.ws_server is not None:
                 # Charge utile construite paresseusement : le serveur limite
@@ -243,12 +306,24 @@ class Bridge(threading.Thread):
 
         Le message est encode UNE seule fois : avec plusieurs destinations,
         passer par send_message() le reconstruirait a chaque envoi.
+
+        Chaque envoi est isole : sans cela une seule destination injoignable
+        (console eteinte, lien sature) tuait le thread et arretait aussi
+        toutes les autres destinations ET la diffusion WebSocket.
         """
         constructeur = OscMessageBuilder(address=adresse)
-        constructeur.add_arg(valeur)
+        type_impose = _type_osc(valeur)
+        if type_impose is None:
+            constructeur.add_arg(valeur)
+        else:
+            constructeur.add_arg(float(valeur), arg_type=type_impose)
         message = constructeur.build()
-        for client in self.osc_clients:
-            client.send(message)
+
+        for cible, client in self._clients_par_cible:
+            try:
+                client.send(message)
+            except Exception as exc:  # noqa: BLE001 - une cible ne doit pas tout arreter
+                self.osc_failures[cible] = f"{type(exc).__name__}: {exc}"
 
     def _ws_payload(self, values: dict, names) -> dict:
         payload = {name: values[name] for name in names if name in values}

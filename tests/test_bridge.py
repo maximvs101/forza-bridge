@@ -5,7 +5,7 @@ import socket
 import threading
 import unittest
 
-from bridge import Bridge, _osc_safe
+from bridge import Bridge
 from channel_catalog import ALL_CHANNELS, RAW_CHANNELS
 from tests.helpers import OscRecorder, free_port, make_packet, wait_until
 
@@ -16,25 +16,6 @@ def envoie(port: int, packet: bytes) -> None:
         sock.sendto(packet, ("127.0.0.1", port))
     finally:
         sock.close()
-
-
-class TestOscSafe(unittest.TestCase):
-    """python-osc bascule sur l'etiquette int64 au-dela de 2^31, que l'OSC In
-    CHOP de TouchDesigner ne decode pas de facon fiable : le canal disparait
-    sans erreur. `timestamp_ms` franchit ce seuil apres ~24,8 jours."""
-
-    def test_entiers_dans_int32_inchanges(self):
-        for valeur in (0, -1, 100, 2 ** 31 - 1, -(2 ** 31)):
-            with self.subTest(valeur=valeur):
-                self.assertIsInstance(_osc_safe(valeur), int)
-
-    def test_entiers_hors_int32_convertis(self):
-        for valeur in (2 ** 31, 4294967295, -(2 ** 31) - 1):
-            with self.subTest(valeur=valeur):
-                self.assertIsInstance(_osc_safe(valeur), float)
-
-    def test_flottants_inchanges(self):
-        self.assertEqual(_osc_safe(3.5), 3.5)
 
 
 class BridgeTestCase(unittest.TestCase):
@@ -159,14 +140,22 @@ class TestRobustesse(BridgeTestCase):
 
     def test_panne_en_cours_de_route_est_visible(self):
         """Sans capture, une exception tuait le thread en silence et
-        l'interface continuait d'afficher "En ecoute"."""
-        self.demarre(selected_channels=frozenset({"speed"}))
+        l'interface continuait d'afficher "En ecoute".
 
-        class ClientCasse:
-            def send(self, *args):
+        Le declencheur n'est PAS une destination OSC : celles-la sont
+        desormais isolees, une seule en panne ne doit plus rien arreter
+        (voir tests/test_bridge_fanout.py). On casse donc la publication
+        WebSocket, qui n'est pas isolee et ne doit pas l'etre.
+        """
+        class ServeurCasse:
+            def note_activity(self):
+                pass
+
+            def publish(self, payload):
                 raise RuntimeError("panne simulee")
 
-        self.bridge.osc_clients = [ClientCasse()]
+        self.demarre(selected_channels=frozenset({"speed"}),
+                     ws_server=ServeurCasse())
         envoie(self.port, make_packet(speed=10.0))
         self.assertTrue(wait_until(lambda: not self.bridge.is_alive()))
         self.assertIn("panne simulee", self.bridge.error)

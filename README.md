@@ -28,8 +28,11 @@ python main.py
 
 Le jeu émet **un paquet par image rendue** : la cadence suit donc le nombre
 d'images par seconde, et non le protocole. Mesuré sur la même machine : 30 Hz
-et 60 Hz en roulant selon la charge, 60 Hz à l'arrêt. Les paquets font
-**324 octets** (format « Horizon Dash »).
+et 60 Hz en roulant selon la charge, 60 Hz à l'arrêt.
+
+Le format « Horizon Dash » fait **323 octets**, plus un octet de fin sur les
+paquets récents — c'est la taille observée sur FH6 aujourd'hui (**324**). Les
+deux sont acceptées, ainsi que le format « sled » seul (232).
 
 Le jeu émet depuis l'adresse réseau de la machine, pas depuis `127.0.0.1` :
 la passerelle écoute donc sur `0.0.0.0`.
@@ -44,7 +47,12 @@ d'alimenter simultanément plusieurs logiciels :
 
 ```bash
 python main.py --osc 127.0.0.1:7000 --osc 192.168.0.50:9000
+python main.py --osc "127.0.0.1:7000, 192.168.0.50:9000"
 ```
+
+Les adresses IPv6 se donnent entre crochets : `[::1]:7000`. Une destination
+injoignable est signalée dans la barre d'état **sans arrêter les autres** ni
+la diffusion WebSocket.
 
 Le nom du véhicule part sur `/forza/car_name` sous forme de chaîne, et
 uniquement au changement de voiture. Une chaîne n'est pas acceptée par tous
@@ -169,15 +177,21 @@ en différentiel, un champ figé y arriverait vide.
 ## Table des véhicules
 
 `car_ordinals.json` traduit l'identifiant numérique envoyé par le jeu en nom
-lisible (660 véhicules). Elle vient d'une liste communautaire, donc figée :
+lisible. Elle vient d'une liste communautaire, donc figée :
 les voitures ajoutées par les mises à jour du jeu s'affichent
 « Véhicule inconnu (ordinal N) », et ces ordinaux sont notés dans
 `car_ordinals_unknown.json`.
 
 ```bash
 python tools/update_car_table.py            # aperçu des différences
-python tools/update_car_table.py --ecrire   # applique
+python tools/update_car_table.py --ecrire   # applique la fusion
 ```
+
+La mise à jour **fusionne** : les entrées locales absentes de la source sont
+conservées, puisque celle-ci n'est pas officielle. `--supprimer` les retire
+explicitement. Les renommages venus de la source sont en revanche appliqués,
+et affichés avant écriture — une source périmée peut donc revenir sur une
+correction locale de nom.
 
 ## Tests
 
@@ -185,9 +199,11 @@ python tools/update_car_table.py --ecrire   # applique
 python -m unittest discover -v
 ```
 
-Aucune dépendance à installer : bibliothèque standard uniquement. Les tests
-couvrent le décodage du paquet, le catalogue, les canaux dérivés, le lissage,
-la boucle de la passerelle, le serveur WebSocket et le service HTTP.
+Les tests n'utilisent que la bibliothèque standard, mais ils importent les
+modules du projet : `python-osc` et `websockets` doivent donc être installés
+(voir `requirements.txt`). Ils couvrent le décodage du paquet, le catalogue,
+les canaux dérivés, le lissage, les destinations OSC, la boucle de la
+passerelle, le serveur WebSocket et le service HTTP.
 
 Chaque test qui protège une correction porte en commentaire le défaut qu'il
 empêche de revenir. Plusieurs sont des **contre-épreuves** : elles vérifient
@@ -200,6 +216,7 @@ rien.
 | Fichier | Rôle |
 |---|---|
 | `forza_telemetry.py` | décodage du paquet UDP |
+| `osc_targets.py` | analyse et mise en forme des destinations OSC |
 | `channel_catalog.py` | catégories, unités, sélection par défaut |
 | `derived_channels.py` | canaux calculés |
 | `smoothing.py` | lissage temporel additif |

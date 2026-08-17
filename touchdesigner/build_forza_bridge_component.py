@@ -120,8 +120,9 @@ def build(destination=None):
     info.text = (
         "Forza Bridge - sortie du composant : null1 (CHOP)\n"
         "Reglez le parametre 'Port' (page Forza) pour qu'il corresponde\n"
-        "au port TouchDesigner configure dans la passerelle Python\n"
-        "(main.py --td-port ou champ 'Port OSC TouchDesigner' du gui.py).\n"
+        "a la destination OSC de la passerelle Python :\n"
+        "  main.py --osc 127.0.0.1:<port>\n"
+        "  ou le champ 'Destinations OSC' de gui.py\n"
         "Voir channel_docs pour la liste des canaux disponibles."
     )
 

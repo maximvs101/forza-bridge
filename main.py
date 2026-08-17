@@ -21,6 +21,7 @@ import argparse
 import sys
 import time
 
+import osc_targets as osc_targets_mod
 import smoothing
 from bridge import Bridge
 from ws_server import TelemetryWebSocketServer
@@ -58,8 +59,8 @@ def run(listen_host: str, listen_port: int, osc_targets: list[tuple[str, int]],
         return 1
 
     print(f"Ecoute UDP Forza sur {listen_host}:{listen_port}")
-    destinations = ", ".join(f"{hote}:{port}" for hote, port in osc_targets)
-    print(f"Envoi OSC vers {destinations} (prefixe /forza/...)")
+    print(f"Envoi OSC vers {osc_targets_mod.formate_cibles(osc_targets)} "
+          f"(prefixe /forza/...)")
     if ws_server:
         portee = "reseau local" if ws_host == "0.0.0.0" else "cette machine uniquement"
         affichage = "localhost" if ws_host == "127.0.0.1" else ws_host
@@ -138,16 +139,34 @@ def main() -> None:
                              "(defaut: cette machine uniquement ; le flux contient la position du vehicule)")
     args = parser.parse_args()
 
-    cibles = []
-    for entree in (args.osc or []):
-        hote, separateur, port = entree.rpartition(":")
-        if not separateur or not port.isdigit() or not (0 < int(port) <= 65535):
-            parser.error(f"--osc attend HOTE:PORT, recu \"{entree}\"")
-        cibles.append((hote, int(port)))
+    # `--osc` accepte aussi la liste separee par des virgules, pour que la
+    # chaine enregistree par l'interface soit recopiable telle quelle.
+    try:
+        cibles = osc_targets_mod.parse_cibles(",".join(args.osc)) if args.osc else []
+    except osc_targets_mod.CibleInvalide as exc:
+        parser.error(f"--osc : {exc}")
+
     if args.td_host is not None or args.td_port is not None:
-        cibles.append((args.td_host or "127.0.0.1", args.td_port or 7000))
+        if cibles:
+            # Ajouter la cible historique diffuserait la telemetrie, position
+            # du vehicule comprise, vers une destination non demandee dans
+            # cette invocation.
+            parser.error("--td-host/--td-port sont remplaces par --osc ; "
+                         "ne pas melanger les deux")
+        hote = args.td_host if args.td_host is not None else "127.0.0.1"
+        port = args.td_port if args.td_port is not None else 7000
+        try:
+            # Meme validation que --osc : l'ancienne voie ne verifiait rien,
+            # et un port hors plage se repliait modulo 65536 en silence.
+            cibles = [osc_targets_mod.parse_cible(
+                osc_targets_mod.formate_cible((hote, port)))]
+        except osc_targets_mod.CibleInvalide as exc:
+            parser.error(f"--td-host/--td-port : {exc}")
+        print("Note : --td-host/--td-port sont obsoletes, utiliser "
+              f"--osc {osc_targets_mod.formate_cibles(cibles)}", file=sys.stderr)
+
     if not cibles:
-        cibles.append(("127.0.0.1", 7000))
+        cibles = [osc_targets_mod.CIBLE_PAR_DEFAUT]
 
     if args.ws_port and not (0 < args.ws_port <= 65535):
         parser.error("--ws-port doit etre compris entre 1 et 65535")

@@ -15,6 +15,7 @@ from pathlib import Path
 from tkinter import ttk
 
 import car_lookup
+import osc_targets
 import smoothing
 import tray
 from bridge import Bridge
@@ -397,23 +398,31 @@ class BridgeGUI:
             return None
         return value
 
+    def _osc_targets_enregistrable(self) -> str:
+        """Chaine a enregistrer, repliee sur le defaut si elle est invalide.
+
+        Sans ce repli, quitter avec un champ vide persistait "" : au
+        lancement suivant la cle existait, ecrasait le defaut, et Demarrer
+        refusait pour toujours sans recours autre que l'edition du fichier.
+        """
+        texte = self.osc_targets_var.get().strip()
+        try:
+            osc_targets.parse_cibles(texte)
+            return texte
+        except osc_targets.CibleInvalide:
+            return osc_targets.formate_cible(osc_targets.CIBLE_PAR_DEFAUT)
+
     def _read_osc_targets(self) -> list[tuple[str, int]] | None:
-        """Lit "hote:port, hote:port". None si une entree est invalide."""
-        cibles = []
-        for entree in self.osc_targets_var.get().replace(";", ",").split(","):
-            entree = entree.strip()
-            if not entree:
-                continue
-            hote, separateur, port = entree.rpartition(":")
-            if not separateur or not port.isdigit() or not (0 < int(port) <= 65535):
-                self.status_var.set(f"Destination OSC invalide : \"{entree}\" "
-                                    f"(attendu hote:port)")
-                return None
-            cibles.append((hote, int(port)))
-        if not cibles:
-            self.status_var.set("Aucune destination OSC.")
+        """Lit le champ des destinations. None si une entree est invalide.
+
+        L'analyse elle-meme vit dans osc_targets, partagee avec la ligne de
+        commande : les deux copies precedentes avaient deja diverge.
+        """
+        try:
+            return osc_targets.parse_cibles(self.osc_targets_var.get())
+        except osc_targets.CibleInvalide as exc:
+            self.status_var.set(f"Destination OSC : {exc}")
             return None
-        return cibles
 
     def _start_worker(self) -> None:
         listen_port = self._read_port(self.listen_port_var, "Port d'ecoute Forza")
@@ -446,7 +455,33 @@ class BridgeGUI:
                 self.ws_server = None
                 return
 
-        self.bridge = Bridge(
+        try:
+            self.bridge = self._construit_pont(listen_port, cibles)
+        except Exception as exc:  # noqa: BLE001 - remonte a la barre d'etat
+            # Sans cette garde, une erreur ici laissait le serveur WebSocket
+            # demarre juste avant tourner sans reference, port compris.
+            self.status_var.set(f"Demarrage impossible : {exc}")
+            self.bridge = None
+            self._stop_ws()
+            return
+
+        self.bridge.start()
+        # Attente d'un evenement plutot qu'un `time.sleep(0.05)` : ce sommeil
+        # figeait l'interface et constituait une course (un bind plus lent que
+        # 50 ms etait rapporte comme un demarrage reussi).
+        self.bridge.bound.wait(timeout=8)
+        if self.bridge.error:
+            self.status_var.set(f"Erreur reseau: {self.bridge.error}")
+            self.bridge = None
+            self._stop_ws()
+            return
+
+        self.start_button.configure(text="Arreter")
+        self.status_var.set(
+            f"Ecoute {listen_port} -> OSC {osc_targets.formate_cibles(cibles)}")
+
+    def _construit_pont(self, listen_port: int, cibles) -> Bridge:
+        return Bridge(
             listen_port=listen_port,
             osc_targets=cibles,
             selected_channels=frozenset(self.selected_channels),
@@ -456,20 +491,6 @@ class BridgeGUI:
             derived=self.derived_var.get(),
             smoothing_settings=smoothing.parse_reglages(self.smoothing_var.get()),
         )
-        self.bridge.start()
-        # Attente d'un evenement plutot qu'un `time.sleep(0.05)` : ce sommeil
-        # figeait l'interface et constituait une course (un bind plus lent que
-        # 50 ms etait rapporte comme un demarrage reussi).
-        self.bridge.bound.wait(timeout=5)
-        if self.bridge.error:
-            self.status_var.set(f"Erreur reseau: {self.bridge.error}")
-            self.bridge = None
-            self._stop_ws()
-            return
-
-        self.start_button.configure(text="Arreter")
-        destinations = ", ".join(f"{h}:{p}" for h, p in cibles)
-        self.status_var.set(f"Ecoute {listen_port} -> OSC {destinations}")
 
     def _stop_ws(self) -> None:
         if self.ws_server is not None:
@@ -507,10 +528,17 @@ class BridgeGUI:
                     text = f"{value:.3f}" if isinstance(value, float) else str(value)
                     self.tree.set(row_id, "value", text)
             status = (
-                f"En ecoute sur le port {self.bridge.listen_port} | "
-                f"paquets recus: {self.bridge.packet_count} | "
-                f"canaux transmis: {len(self.selected_channels)}"
+                f"Ecoute {self.bridge.listen_port} -> OSC "
+                f"{osc_targets.formate_cibles(self.bridge.osc_targets)} | "
+                f"paquets: {self.bridge.packet_count} | "
+                f"canaux: {len(self.selected_channels)}"
             )
+            # Les destinations en echec doivent se voir : une seule cible
+            # injoignable n'arrete plus le pont, donc rien d'autre ne le
+            # signalerait.
+            if self.bridge.osc_failures:
+                status += (" | ECHEC: " + ", ".join(
+                    osc_targets.formate_cible(c) for c in self.bridge.osc_failures))
             if self.ws_server is not None:
                 portee = "reseau" if self.ws_server.host == "0.0.0.0" else "local"
                 status += (
@@ -524,7 +552,9 @@ class BridgeGUI:
     def _refresh_vehicle_info(self, values: dict[str, float]) -> None:
         if not values:
             return
-        self.car_name_var.set(car_lookup.describe(values.get("car_ordinal")))
+        # Le pont a deja calcule ce libelle une fois au changement de
+        # vehicule ; describe() prend un verrou et peut ecrire sur disque.
+        self.car_name_var.set(self.bridge.car_name if self.bridge else "-")
         pi = values.get("car_performance_index")
         cylinders = values.get("num_cylinders")
         self.car_detail_var.set(
@@ -551,7 +581,7 @@ class BridgeGUI:
 
         self.config_data.update({
             "listen_port": as_number(self.listen_port_var, 5300),
-            "osc_targets": self.osc_targets_var.get().strip(),
+            "osc_targets": self._osc_targets_enregistrable(),
             "only_racing": self.only_racing_var.get(),
             "send_car_name": self.send_car_name_var.get(),
             "ws_enabled": self.ws_enabled_var.get(),

@@ -11,3 +11,5 @@ config.json
 car_ordinals_unknown.json
 tests/_config_test.json
 tests/_inconnus_test.json
+# Fichiers temporaires d'ecriture atomique
+*.json.tmp
