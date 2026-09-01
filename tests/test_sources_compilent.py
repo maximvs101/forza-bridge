@@ -6,9 +6,8 @@ verification faite plus tard, a la compilation. Le test de langue, qui lit les
 fichiers avec `ast`, a donc laisse passer un outil qui ne demarrait plus. Il est
 reste casse jusqu'a ce qu'un test l'importe enfin.
 
-Sont particulierement concernes les fichiers qu'aucun test n'importe : les
-scripts constructeurs TouchDesigner (ils appellent build() a l'import, ce qui
-n'a de sens que dans TD) et l'outil d'entretien.
+Sont particulierement concernes les fichiers qu'aucun test n'importe, comme
+l'outil d'entretien de la table des vehicules.
 """
 
 import py_compile
@@ -37,8 +36,7 @@ class TestCompilation(unittest.TestCase):
         au vert en ne verifiant plus rien."""
         noms = {c.name for c in sources()}
         for attendu in ("bridge.py", "gui.py", "main.py", "forza_telemetry.py",
-                        "update_car_table.py", "build_cables_patch.py",
-                        "build_forza_bridge_component.py"):
+                        "ws_server.py", "update_car_table.py"):
             with self.subTest(fichier=attendu):
                 self.assertIn(attendu, noms)
 
@@ -68,12 +66,6 @@ class TestOutilsExecutables(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("--write", r.stdout)
         self.assertIn("--remove", r.stdout)
-
-    def test_generateur_cables(self):
-        r = self._aide("cables/build_cables_patch.py")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("--template", r.stdout)
-        self.assertIn("--output", r.stdout)
 
     def test_ligne_de_commande_principale(self):
         r = self._aide("main.py")

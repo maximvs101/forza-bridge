@@ -1,9 +1,9 @@
 """Reglages passes dans l'URL de connexion.
 
 Voie indispensable pour les clients incapables d'envoyer une commande au bon
-moment : dans cables.gl, l'op WebSocket publie son port `Connected` AVANT son
-port `Connection`, si bien qu'un envoi declenche par `Connected` part alors
-que la connexion n'est pas encore transmise, et se perd en silence.
+moment : certains signalent la connexion comme etablie avant que l'objet de
+connexion ne soit utilisable, si bien qu'une commande envoyee a cet instant
+part dans le vide et se perd en silence.
 """
 
 import asyncio

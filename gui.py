@@ -53,8 +53,8 @@ def load_config() -> dict:
     if CONFIG_PATH.exists():
         try:
             saved = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-            # Reprise d'une configuration anterieure, quand la destination OSC
-            # etait un couple hote/port unique nomme d'apres TouchDesigner.
+            # Reprise d'une configuration anterieure, quand la destination
+            # OSC etait un couple hote/port unique.
             host = saved.pop("td_host", None)
             port = saved.pop("td_port", None)
             if "osc_targets" not in saved and (host or port):

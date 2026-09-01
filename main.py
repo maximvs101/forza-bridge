@@ -4,9 +4,8 @@ Ecoute le flux "Data Out" UDP de Forza Horizon, retransmet chaque champ
 de telemetrie en OSC vers une ou plusieurs destinations, et diffuse la meme
 telemetrie en WebSocket pour les outils web.
 
-Compatible avec tout logiciel parlant OSC ou WebSocket : creation visuelle
-(TouchDesigner, cables.gl, vvvv), lumiere (QLC+, Chataigne), son
-(SuperCollider, Pure Data, Sonic Pi), overlay de diffusion.
+Compatible avec tout logiciel parlant OSC ou WebSocket : creation visuelle,
+lumiere, son, overlay de diffusion.
 
 La boucle elle-meme vit dans bridge.py, partagee avec l'interface graphique.
 

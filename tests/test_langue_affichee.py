@@ -51,7 +51,7 @@ class TestTextesDesModules(unittest.TestCase):
     FICHIERS = ["channel_catalog.py", "derived_channels.py", "smoothing.py",
                 "osc_targets.py", "car_lookup.py", "tray.py", "bridge.py",
                 "main.py", "gui.py", "ws_server.py", "http_assets.py",
-                "tools/update_car_table.py", "cables/build_cables_patch.py"]
+                "tools/update_car_table.py"]
 
     @staticmethod
     def _chaines_hors_docstrings(chemin: pathlib.Path):

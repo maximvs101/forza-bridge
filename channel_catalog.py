@@ -1,7 +1,7 @@
 """Catalogue des canaux de telemetrie exposes dans l'interface.
 
 Les noms de categories et les libelles d'unites sont AFFICHES (interface,
-table TouchDesigner, message d'accueil WebSocket) : ils sont donc en anglais,
+message d'accueil WebSocket) : ils sont donc en anglais,
 comme le reste de ce que voit l'utilisateur.
 
 Regroupe les champs de forza_telemetry.py par categorie pour l'affichage,

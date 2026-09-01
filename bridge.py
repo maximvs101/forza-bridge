@@ -46,10 +46,9 @@ def _osc_type(value):
     """Type OSC a imposer, ou None pour laisser python-osc decider.
 
     python-osc emet `,i` (int32) sous 2^31 et bascule sur `,h` (int64)
-    au-dela. Tous les recepteurs ne decodent pas `h` de facon fiable — l'OSC
-    In CHOP de TouchDesigner, par exemple, laisse alors le canal cesser de se
-    mettre a jour sans erreur. `timestamp_ms` franchit ce seuil apres
-    ~24,8 jours de fonctionnement.
+    au-dela. Tous les recepteurs ne decodent pas `h` de facon fiable :
+    certains laissent alors le canal cesser de se mettre a jour, sans erreur.
+    `timestamp_ms` franchit ce seuil apres ~24,8 jours de fonctionnement.
 
     On force alors le type `d` (double, 64 bits). Convertir en `float` sans
     plus de precaution ne suffit PAS : python-osc encode tout flottant
@@ -308,9 +307,9 @@ class Bridge(threading.Thread):
                 self._car_name = car_lookup.describe(ordinal)
                 self.smoother.reset()
                 if self.send_car_name:
-                    # Chaine de caracteres : certains recepteurs n'acceptent
-                    # que des nombres sur leur entree principale (dans
-                    # TouchDesigner par exemple, il faut un OSC In DAT).
+                    # Chaine de caracteres : certains recepteurs OSC
+                    # n'acceptent que des nombres sur leur entree principale
+                    # et l'ignorent, ou exigent une entree dediee.
                     self._emit(f"{OSC_ADDRESS_PREFIX}/car_name", self._car_name)
 
             for name in names:

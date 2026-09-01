@@ -5,5 +5,4 @@
 
 # Donnees et gabarits : du JSON, jamais du binaire, pour que les differences
 # restent lisibles.
-*.json  text
-*.cables text
+*.json text

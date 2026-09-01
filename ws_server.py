@@ -1,7 +1,7 @@
 """Serveur WebSocket de diffusion de la telemetrie Forza.
 
-Complement a la sortie OSC : ouvre l'acces aux outils web (cables.gl,
-overlay OBS, three.js, p5.js...) qui ne parlent pas OSC.
+Complement a la sortie OSC : ouvre l'acces aux outils web (navigateur,
+overlay de diffusion, moteurs de rendu JavaScript) qui ne parlent pas OSC.
 
 Le serveur tourne dans son propre thread avec sa propre boucle asyncio,
 pour ne pas bloquer la reception UDP. Le code appelant appelle `publish()`
@@ -35,11 +35,11 @@ Ou par commande JSON envoyee ensuite :
   {"subscribe": "*"}                revient a tout recevoir
   {"full": true}                    etat complet a chaque trame, sans fusion
 
-`full` sert aux consommateurs qui traitent chaque message isolement
-(cables.gl et assimiles), ou un champ inchange arriverait "undefined" en mode
-differentiel. PREFERER L'URL pour ces clients-la : dans cables, l'op
-WebSocket publie son port `Connected` avant son port `Connection`, si bien
-qu'un envoi declenche par `Connected` part sans connexion et se perd.
+`full` sert aux consommateurs qui traitent chaque message isolement, sans
+etat accumule : un champ inchange y arriverait "undefined" en mode
+differentiel. PREFERER L'URL pour ces clients-la, car certains signalent leur
+connexion comme etablie avant de pouvoir emettre : une commande envoyee a ce
+moment part sans connexion et se perd en silence.
 """
 
 from __future__ import annotations
@@ -130,9 +130,9 @@ class TelemetryWebSocketServer:
         # connexion -> ensemble de canaux, ou None pour "tout"
         self._subscriptions: dict = {}
         # Connexions qui veulent l'etat complet a chaque trame plutot que les
-        # seules variations. Destine aux consommateurs sans etat accumule
-        # (cables.gl traite chaque message isolement : un champ inchange y
-        # arriverait "undefined").
+        # seules variations. Destine aux consommateurs sans etat accumule, qui
+        # traitent chaque message isolement : un champ inchange y arriverait
+        # "undefined".
         self._full_frames: dict = {}
         # Envois d'etat suivis separement des envois de telemetrie : les deux
         # flux ne doivent pas se bloquer l'un l'autre, mais chacun doit rester
@@ -290,10 +290,10 @@ class TelemetryWebSocketServer:
             ws://hote:port/?full=1&channels=speed,gear
 
         Indispensable pour les clients qui ne savent pas envoyer de commande
-        au bon moment. Dans cables.gl par exemple, l'op WebSocket publie son
-        port `Connected` AVANT son port `Connection` : un envoi declenche par
-        `Connected` part alors que la connexion n'est pas encore transmise,
-        et se perd en silence. L'URL, elle, est lue avant toute trame.
+        au bon moment : certains signalent la connexion comme etablie avant
+        que l'objet de connexion ne soit utilisable, si bien qu'une commande
+        envoyee a cet instant part dans le vide et se perd en silence.
+        L'URL, elle, est lue avant toute trame.
         """
         requete = getattr(connection, "request", None)
         if requete is None or not getattr(requete, "path", None):

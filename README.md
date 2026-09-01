@@ -1,8 +1,7 @@
 # Forza Horizon telemetry bridge
 
-Turns *Forza Horizon 6* telemetry into interaction sources for any software
-that speaks **OSC** or **WebSocket**: TouchDesigner, cables.gl, vvvv, QLC+,
-Chataigne, SuperCollider, Pure Data, VCV Rack, OBS overlays.
+Turns *Forza Horizon 6* telemetry into **OSC** and **WebSocket** streams, for
+any software that speaks either — visuals, lighting, sound, streaming overlays.
 
 It decodes the 92 fields of the game's "Data Out" packet, computes 20 more
 already scaled for use, and rebroadcasts everything.
@@ -49,8 +48,9 @@ python main.py --osc 127.0.0.1:7000 --osc 192.168.0.50:9000
 IPv6 goes in brackets: `[::1]:7000`. An unreachable destination is reported
 without stopping the others.
 
-The vehicle name is sent on `/forza/car_name` as a **string**, and only when the
-car changes — in TouchDesigner that needs an OSC In DAT, not an OSC In CHOP.
+The vehicle name is sent on `/forza/car_name` as a **string**, and only when
+the car changes. Some OSC receivers accept numbers only on their main input:
+check yours has a way in for strings.
 
 ## WebSocket
 
@@ -129,16 +129,6 @@ on/off, "only while racing", computed channels); those that cannot are greyed
 out rather than pretending. Closing the window hides the app in the tray without
 stopping the bridge.
 
-## TouchDesigner and cables.gl
-
-`touchdesigner/` holds two scripts to paste into a **Text DAT** and run once:
-one builds a reusable `forza_bridge` component (OSC In CHOP configured, channel
-table, saved as `.tox`), the other a basic dashboard.
-
-`cables/build_cables_patch.py` generates a complete `.cables` patch wired to the
-bridge. Open it with **File → Open patch**: drag and drop goes to the asset
-uploader and fails.
-
 ## Vehicle table
 
 `car_ordinals.json` maps the identifier the game sends to a readable name.
@@ -164,7 +154,7 @@ source is not official. `--remove` drops them explicitly.
 python -m unittest discover
 ```
 
-315 tests, standard library only. They cover packet decoding, the catalogue,
+313 tests, standard library only. They cover packet decoding, the catalogue,
 computed channels, smoothing, OSC destinations, the bridge loop, the WebSocket
 server, the interface and the overlay's own JavaScript (that one needs `node`,
 and skips without it).

@@ -1,6 +1,6 @@
 """Option "trames completes" par client.
 
-Destinee aux consommateurs sans etat accumule (cables.gl traite chaque
+Destinee aux consommateurs sans etat accumule (certains traitent chaque
 message isolement) : en mode differentiel, un champ inchange y arriverait
 "undefined".
 """
