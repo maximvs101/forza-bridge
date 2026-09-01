@@ -241,6 +241,12 @@ name. It comes from a community list, so it is frozen: cars added by game
 updates show as "Unknown vehicle (ordinal N)", and those ordinals are logged
 to `car_ordinals_unknown.json`.
 
+The list is **not mine and not official**: it is the community gist
+["All Car Ordinal id's for Forza Horizon 6"](https://gist.github.com/HDR/0659d1717bc61504bf83750628963f4f)
+by **HDR**, inverted here from name → ordinal into ordinal → name. Credit goes
+there; corrections are worth sending upstream as well as here. That is also
+why the update merges rather than replaces (see below).
+
 ```bash
 python tools/update_car_table.py           # preview the differences
 python tools/update_car_table.py --write   # apply the merge
@@ -322,3 +328,33 @@ user-facing string is in English.
 
 `python-osc` and `websockets` are required. `pystray` and `Pillow` are only
 used for the tray icon: without them the interface stays an ordinary window.
+
+## Confirmations wanted
+
+Three things here were established by measurement on **one** machine and
+**one** game version. If your stream differs, an issue would settle them —
+they are the only claims in this README that are not backed by data taken
+here.
+
+- **Tyre wear at offsets 323/327/331/335.** Never seen: this machine's stream
+  is 324 bytes, so those fields are absent. The offsets come from
+  [TheBanHammer/fh6-tel](https://github.com/TheBanHammer/fh6-tel). If your
+  packets are 339 or 340 bytes, do `tire_wear_*` read as plausible 0-1
+  fractions? Anything else means the offsets are wrong.
+- **`gear` = 11 while shifting.** Verified on two cars, both with automatic
+  transmission — `clutch` stayed 0 throughout, so the clutch byte could not
+  corroborate it. Does a manual-with-clutch setup show the same 11, and does
+  `clutch` move during those frames?
+- **Packet sizes.** 232, 323, 324, 339 and 340 are accepted; anything else is
+  refused **and reported** with its size. If you see that warning, the size it
+  names is exactly what is missing here.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
+
+One exception, and it is not mine to license: `car_ordinals.json` is derived
+from the community gist credited under [Vehicle table](#vehicle-table). It is
+included so the tool works out of the box; if its author objects, it can be
+fetched at first run instead — `tools/update_car_table.py` already does
+exactly that.

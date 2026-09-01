@@ -1,0 +1,9 @@
+# Fins de ligne normalisees : LF dans le depot, conversion locale selon la
+# plateforme. Sans cela, git avertit a chaque commit depuis Windows et un
+# clone sous Linux recevrait des CRLF.
+* text=auto
+
+# Donnees et gabarits : du JSON, jamais du binaire, pour que les differences
+# restent lisibles.
+*.json  text
+*.cables text
