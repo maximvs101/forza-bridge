@@ -15,6 +15,7 @@ Lancement: python gui.py
 from __future__ import annotations
 
 import json
+import time
 import tkinter as tk
 import webbrowser
 from pathlib import Path
@@ -87,6 +88,10 @@ class BridgeGUI:
         self.tray: tray.TrayIcon | None = None
         self._current_state: str | None = None
         self._refresh_id: str | None = None
+        # Echeance du message temporaire : la barre d'etat est reecrite
+        # toutes les 150 ms pendant la marche, si bien que tout retour
+        # d'action disparaissait avant d'avoir pu etre lu.
+        self._flash_until = 0.0
 
         self._build_settings()
         self._build_vehicle()
@@ -371,10 +376,10 @@ class BridgeGUI:
         try:
             tau = float(self.smoothing_value_var.get())
         except ValueError:
-            self.status_var.set("Smoothing: not a number.")
+            self._flash("Smoothing: not a number.")
             return
         if tau <= 0:
-            self.status_var.set("Smoothing: value must be positive.")
+            self._flash("Smoothing: value must be positive.")
             return
 
         channels = self._selected_rows_channels()
@@ -391,7 +396,7 @@ class BridgeGUI:
             message += f" Skipped (not smoothable): {', '.join(refused[:4])}"
             if len(refused) > 4:
                 message += f" +{len(refused) - 4}"
-        self.status_var.set(message)
+        self._flash(message)
 
     def _clear_selection_smoothing(self) -> None:
         removed = 0
@@ -399,7 +404,7 @@ class BridgeGUI:
             if self.smoothing_settings.pop(name, None) is not None:
                 removed += 1
         self._apply_smoothing()
-        self.status_var.set(f"Smoothing cleared on {removed} channel(s).")
+        self._flash(f"Smoothing cleared on {removed} channel(s).")
 
     def _apply_smoothing(self) -> None:
         self._refresh_smoothing_column()
@@ -417,10 +422,10 @@ class BridgeGUI:
         try:
             value = int(var.get())
         except ValueError:
-            self.status_var.set(f"{label}: not a number.")
+            self._flash(f"{label}: not a number.")
             return None
         if not (0 < value <= 65535):
-            self.status_var.set(f"{label}: out of range (1-65535).")
+            self._flash(f"{label}: out of range (1-65535).")
             return None
         return value
 
@@ -430,7 +435,7 @@ class BridgeGUI:
         try:
             return osc_targets.parse_targets(self.osc_targets_var.get())
         except osc_targets.InvalidTarget as exc:
-            self.status_var.set(f"OSC destination: {exc}")
+            self._flash(f"OSC destination: {exc}")
             return None
 
     def _toggle_bridge(self) -> None:
@@ -452,10 +457,10 @@ class BridgeGUI:
         try:
             ws_rate = float(self.ws_rate_var.get())
         except ValueError:
-            self.status_var.set("WebSocket rate: not a number.")
+            self._flash("WebSocket rate: not a number.")
             return False
         if ws_rate <= 0:
-            self.status_var.set("WebSocket rate must be positive.")
+            self._flash("WebSocket rate must be positive.")
             return False
         # Ecoute locale sauf demande explicite : le flux contient la
         # position du vehicule.
@@ -464,7 +469,7 @@ class BridgeGUI:
             host=ws_host, port=ws_port, rate_hz=ws_rate,
             differential=self.ws_differential_var.get())
         if not self.ws_server.start():
-            self.status_var.set(f"WebSocket error: {self.ws_server.error}")
+            self._flash(f"WebSocket error: {self.ws_server.error}")
             self.ws_server = None
             return False
         return True
@@ -494,7 +499,7 @@ class BridgeGUI:
         except Exception as exc:  # noqa: BLE001 - remonte a la barre d'etat
             # Sans cette garde, une erreur ici laissait le serveur WebSocket
             # demarre juste avant tourner sans reference, port compris.
-            self.status_var.set(f"Cannot start: {exc}")
+            self._flash(f"Cannot start: {exc}")
             self.bridge = None
             self._stop_ws()
             return
@@ -504,7 +509,7 @@ class BridgeGUI:
         # figeait l'interface et constituait une course.
         self.bridge.bound.wait(timeout=8)
         if self.bridge.error:
-            self.status_var.set(f"Network error: {self.bridge.error}")
+            self._flash(f"Network error: {self.bridge.error}")
             self.bridge = None
             self._stop_ws()
             return
@@ -560,12 +565,11 @@ class BridgeGUI:
             # message d'accueil et de la trame d'etat doivent suivre, sinon le
             # serveur annonce 0 canal et aucun vehicule.
             self.bridge.attach_ws_server(self.ws_server)
-            self.status_var.set(
-                f"WebSocket started on port {self.ws_server.port}.")
+            self._flash(f"WebSocket started on port {self.ws_server.port}.")
         elif not wanted and self.ws_server is not None:
             self.bridge.attach_ws_server(None)  # avant l'arret : relu en boucle
             self._stop_ws()
-            self.status_var.set("WebSocket stopped.")
+            self._flash("WebSocket stopped.")
         self._refresh_controls()
 
     def _on_only_racing_toggled(self) -> None:
@@ -601,8 +605,24 @@ class BridgeGUI:
         self.root.lift()
 
     def _open_overlay(self) -> None:
-        port = self.ws_port_var.get().strip() or "8765"
-        webbrowser.open(f"http://localhost:{port}/")
+        """Ouvre l'overlay, ou explique pourquoi il n'y a rien a ouvrir.
+
+        Ouvrir l'URL serveur arrete affichait une erreur de connexion du
+        navigateur, sans rapport apparent avec la case a cocher qui en est la
+        cause.
+        """
+        if self.ws_server is None:
+            self._flash("Overlay needs the WebSocket server: "
+                        + ("tick Enabled under WebSocket output."
+                           if self.bridge is not None
+                           else "enable it, then press Start."))
+            # Le bouton peut venir de la barre systeme, fenetre repliee : le
+            # message serait invisible et le clic sans effet apparent.
+            self._show_window()
+            return
+        # Le port REELLEMENT en ecoute, et non le champ de saisie : les deux
+        # different tant que le serveur n'a pas ete redemarre.
+        webbrowser.open(f"http://localhost:{self.ws_server.port}/")
 
     def _quit(self) -> None:
         self._on_close()
@@ -644,9 +664,22 @@ class BridgeGUI:
                         self.tree.set(row, "value",
                                       f"{value:.3f}" if isinstance(value, float)
                                       else str(value))
-                self.status_var.set(self._running_status())
+                # Ne pas ecraser un message temporaire encore lisible.
+                if time.monotonic() >= self._flash_until:
+                    self.status_var.set(self._running_status())
         self._refresh_state()
         self._refresh_id = self.root.after(150, self._refresh_loop)
+
+    def _flash(self, message: str, seconds: float = 6.0) -> None:
+        """Affiche un message le temps de le lire.
+
+        Sans echeance, `_refresh_loop` ecrasait dans les 150 ms tout retour
+        d'action : lissage applique, canaux refuses parce que non lissables,
+        WebSocket demarre ou arrete, erreur de port. Mesure : un message pose
+        pont en marche avait disparu 600 ms plus tard.
+        """
+        self.status_var.set(message)
+        self._flash_until = time.monotonic() + seconds
 
     def _running_status(self) -> str:
         bridge = self.bridge

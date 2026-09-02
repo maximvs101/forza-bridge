@@ -130,8 +130,9 @@ channel; select rows to apply smoothing to several at once.
 
 Settings that can be applied while running are applied immediately (WebSocket
 on/off, "only while racing", computed channels); those that cannot are greyed
-out rather than pretending. Closing the window hides the app in the tray without
-stopping the bridge.
+out rather than pretending. **Open overlay** says what is missing instead of
+opening a dead page when the server is off. Closing the window hides the app in
+the tray without stopping the bridge.
 
 ## Vehicle table
 
@@ -158,7 +159,7 @@ source is not official. `--remove` drops them explicitly.
 python -m unittest discover
 ```
 
-322 tests, standard library only. They cover packet decoding, the catalogue,
+331 tests, standard library only. They cover packet decoding, the catalogue,
 computed channels, smoothing, OSC destinations, the bridge loop, the WebSocket
 server, the interface and the overlay's own JavaScript (that one needs `node`,
 and skips without it).
