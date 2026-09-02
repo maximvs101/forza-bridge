@@ -133,6 +133,10 @@ class Bridge(threading.Thread):
 
         self._last_ordinal: int | None = None
         self._car_name: str = "-"
+        # Etabli par run(), mais defini des ici : `_emit` s'en sert, et un
+        # appel avant le demarrage levait AttributeError au lieu de ne rien
+        # faire.
+        self._clients_by_target: list = []
 
         self.attach_ws_server(ws_server)
 
@@ -217,7 +221,36 @@ class Bridge(threading.Thread):
         self._clients_by_target = clients
         self.osc_clients = [client for _, client in clients]
 
+    def _close_clients(self) -> None:
+        """Ferme les sockets OSC ouverts par le pont.
+
+        Un client par destination et par demarrage : sans fermeture, chaque
+        cycle Start/Stop laissait un socket UDP ouvert jusqu'au passage du
+        ramasse-miettes (ResourceWarning visible en test). `SimpleUDPClient`
+        expose bien un `close()` public.
+
+        Les clients INJECTES appartiennent a l'appelant : on n'y touche pas.
+        """
+        if self._clients_fournis:
+            return
+        for client in self.osc_clients:
+            fermer = getattr(client, "close", None)
+            if not callable(fermer):
+                continue
+            try:
+                fermer()
+            except Exception:  # noqa: BLE001 - une fermeture ne doit rien casser
+                pass
+
     def run(self) -> None:
+        try:
+            self._execute()
+        finally:
+            # Toutes les sorties passent par ici, l'echec de bind compris :
+            # sinon un port deja pris laissait les sockets OSC ouverts.
+            self._close_clients()
+
+    def _execute(self) -> None:
         if not self._clients_fournis:
             self._build_clients()
             if not self.osc_clients:

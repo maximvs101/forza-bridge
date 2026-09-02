@@ -159,7 +159,7 @@ source is not official. `--remove` drops them explicitly.
 python -m unittest discover
 ```
 
-331 tests, standard library only. They cover packet decoding, the catalogue,
+338 tests, standard library only. They cover packet decoding, the catalogue,
 computed channels, smoothing, OSC destinations, the bridge loop, the WebSocket
 server, the interface and the overlay's own JavaScript (that one needs `node`,
 and skips without it).
