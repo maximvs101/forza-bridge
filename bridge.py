@@ -317,17 +317,28 @@ class Bridge(threading.Thread):
             if self.ws_server is not None:
                 self.ws_server.note_activity()
 
-            if self.only_racing and not frame.is_race_on:
-                continue
-
             values = frame.values
             if self.derived:
                 # Fusionnes aux canaux bruts : tout l'aval (OSC, WebSocket,
                 # interface, accueil) les traite sans rien de particulier.
                 values = {**values, **derived_channels.compute(values)}
-            if self.smoother.active:
-                values = self.smoother.apply(values, time.monotonic())
+
+            # L'AFFICHAGE est mis a jour avant le filtre : il doit montrer ce
+            # que le jeu envoie, meme quand "seulement en course" empeche de
+            # le retransmettre. Sinon le tableau restait fige sur la derniere
+            # trame en course — vitesse d'il y a dix minutes affichee comme
+            # courante — et `is_race_on` de la trame d'etat restait bloque a
+            # vrai, puisqu'il est lu ici.
             self.latest_values = values
+
+            if self.only_racing and not frame.is_race_on:
+                continue
+
+            if self.smoother.active:
+                # Le lissage porte sur le flux EMIS : l'appliquer aux trames
+                # filtrees ferait deriver son etat sur des zeros de menu.
+                values = self.smoother.apply(values, time.monotonic())
+                self.latest_values = values
             self.packet_count += 1
 
             # Instantane : `selected_channels` peut etre reaffecte par

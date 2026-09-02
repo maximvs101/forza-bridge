@@ -73,7 +73,9 @@ hard-code), **telemetry** (differential by default, complete state every 2 s),
 
 `status` carries two counters, not one: `packets_received` answers "is the game
 sending?", `packets` answers "how many frames were forwarded". They differ when
-`--only-racing` filters.
+`--only-racing` filters — and while it does, the interface still shows what the
+game is sending, because the filter governs what is *sent*, not what is
+*displayed*.
 
 ## Channels
 
@@ -159,7 +161,7 @@ source is not official. `--remove` drops them explicitly.
 python -m unittest discover
 ```
 
-338 tests, standard library only. They cover packet decoding, the catalogue,
+348 tests, standard library only. They cover packet decoding, the catalogue,
 computed channels, smoothing, OSC destinations, the bridge loop, the WebSocket
 server, the interface and the overlay's own JavaScript (that one needs `node`,
 and skips without it).

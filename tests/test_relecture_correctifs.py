@@ -186,13 +186,15 @@ class TestIndicateurAvecSeulementEnCourse(unittest.TestCase):
                          "les trames filtrees ne doivent pas etre emises")
 
     def test_etat_annonce_le_jeu_connecte(self):
+        """Ni NO_DATA (le jeu emet), ni ACTIVE (rien ne part) : l'etat dit
+        que le filtre retient tout."""
         port, pont = self._pont()
         for _ in range(5):
             envoie(port, make_packet(is_race_on=0, speed=0.0))
         wait_until(lambda: pont.received_count >= 5)
 
         etat = tray.bridge_state(pont, moving=False)
-        self.assertEqual(etat, tray.IDLE, tray.LABELS.get(etat))
+        self.assertEqual(etat, tray.FILTERED, tray.LABELS.get(etat))
         self.assertNotEqual(etat, tray.NO_DATA)
 
     def test_aucun_paquet_reste_no_data(self):

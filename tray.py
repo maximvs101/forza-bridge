@@ -20,6 +20,9 @@ import threading
 STOPPED = "stopped"
 FAILED = "failed"
 NO_DATA = "no_data"
+# Des paquets arrivent, mais "seulement en course" les retient tous : rien ne
+# part vers l'aval, et c'est voulu. L'annoncer evite de chercher une panne.
+FILTERED = "filtered"
 IDLE = "idle"
 ACTIVE = "active"
 
@@ -27,6 +30,7 @@ COLOURS = {
     STOPPED: (110, 110, 110),    # gris   : pont a l'arret
     FAILED: (220, 60, 60),       # rouge  : le pont s'est interrompu
     NO_DATA: (240, 170, 40),     # orange : aucun paquet ne vient du jeu
+    FILTERED: (110, 150, 230),   # bleu   : paquets recus mais tous filtres
     IDLE: (240, 210, 60),        # jaune  : paquets recus, mais rien ne bouge
     ACTIVE: (70, 200, 90),       # vert   : telemetrie en mouvement
 }
@@ -35,6 +39,7 @@ LABELS = {
     STOPPED: "Bridge stopped",
     FAILED: "Bridge interrupted",
     NO_DATA: "No packets from the game",
+    FILTERED: "Game connected, not racing",
     IDLE: "Game connected, vehicle stationary",
     ACTIVE: "Telemetry active",
 }
@@ -61,6 +66,11 @@ def bridge_state(bridge, moving: bool | None = None) -> str:
         recus = getattr(bridge, "packet_count", 0)
     if recus == 0:
         return NO_DATA
+    # Le filtre retient tout : annoncer "Telemetry active" serait faux, plus
+    # rien ne part. L'etat le dit, plutot que de laisser chercher une panne.
+    valeurs = getattr(bridge, "latest_values", None) or {}
+    if getattr(bridge, "only_racing", False) and not valeurs.get("is_race_on"):
+        return FILTERED
     if moving is False:
         return IDLE
     return ACTIVE
