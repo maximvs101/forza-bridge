@@ -180,9 +180,17 @@ class TelemetryWebSocketServer:
             return
         loop, stop_future = self._loop, self._stop_future
         if stop_future is not None:
-            loop.call_soon_threadsafe(
-                lambda: stop_future.done() or stop_future.set_result(None)
-            )
+            try:
+                loop.call_soon_threadsafe(
+                    lambda: stop_future.done() or stop_future.set_result(None)
+                )
+            except RuntimeError:
+                # Meme cause que dans publish() : la boucle peut deja etre
+                # fermee (arret double, ou boucle morte d'elle-meme alors que
+                # `_loop` est encore renseigne). Il n'y a alors plus rien a
+                # arreter, et lever ici ferait echouer la fermeture de
+                # l'interface.
+                pass
         if self._thread is not None:
             self._thread.join(timeout=3)
         self._thread = None
@@ -427,7 +435,10 @@ class TelemetryWebSocketServer:
         # d'arriver jusqu'ici.
         self.note_activity()
 
-        if self._loop is None or not self._clients:
+        # Une SEULE lecture de `_loop`, gardee dans une locale : relu plus
+        # bas, il pouvait etre remis a None entre-temps par stop().
+        loop = self._loop
+        if loop is None or not self._clients:
             return False
 
         # Cadence planifiee, et non "temps ecoule depuis le dernier envoi" :
@@ -469,7 +480,16 @@ class TelemetryWebSocketServer:
             self.dropped_count += 1
             return False
 
-        self._loop.call_soon_threadsafe(self._broadcast, out, message)
+        try:
+            loop.call_soon_threadsafe(self._broadcast, out, message)
+        except RuntimeError:
+            # `stop()` ferme la boucle asyncio AVANT de remettre `_loop` a
+            # None : entre les deux, cet appel leve "Event loop is closed".
+            # L'exception remontait dans la boucle du pont, qui mourait alors
+            # sur un simple decochage de la case WebSocket pendant que le jeu
+            # emettait. Une trame perdue a l'arret ne merite pas ca.
+            self.dropped_count += 1
+            return False
         return True
 
     @staticmethod

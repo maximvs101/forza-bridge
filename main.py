@@ -84,7 +84,14 @@ def run(listen_host: str, listen_port: int, targets: list[tuple[str, int]],
             values = bridge.latest_values
             speed_kmh = values.get("speed", 0.0) * 3.6
             rpm = values.get("current_engine_rpm", 0.0)
-            line = (f"\rPackets: {bridge.packet_count} | "
+            # "Packets" se lit comme "le jeu m'envoie-t-il quelque chose" :
+            # c'est donc le compteur des paquets RECUS. Le nombre de trames
+            # reellement emises n'apparait que lorsqu'il en differe, c'est-a-
+            # dire quand "seulement en course" filtre.
+            recus = bridge.received_count
+            compteur = (f"{recus}" if recus == bridge.packet_count
+                        else f"{recus} ({bridge.packet_count} sent)")
+            line = (f"\rPackets: {compteur} | "
                     f"speed: {speed_kmh:6.1f} km/h | rpm: {rpm:6.0f}")
             if ws_server:
                 line += f" | WS: {ws_server.client_count} client(s)"

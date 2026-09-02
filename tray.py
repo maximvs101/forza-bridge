@@ -52,7 +52,14 @@ def bridge_state(bridge, moving: bool | None = None) -> str:
         return FAILED
     if not bridge.is_alive():
         return FAILED
-    if bridge.packet_count == 0:
+    # `received_count` compte les paquets du jeu avant tout filtrage :
+    # avec "seulement en course", `packet_count` reste a 0 en menu alors que
+    # le jeu emet, et l'etat annonce etait NO_DATA. Repli sur `packet_count`
+    # pour les objets qui n'exposent pas le compteur detaille.
+    recus = getattr(bridge, "received_count", None)
+    if recus is None:
+        recus = getattr(bridge, "packet_count", 0)
+    if recus == 0:
         return NO_DATA
     if moving is False:
         return IDLE
@@ -61,8 +68,13 @@ def bridge_state(bridge, moving: bool | None = None) -> str:
 
 def tooltip(state: str, bridge=None) -> str:
     text = LABELS.get(state, state)
-    if bridge is not None and getattr(bridge, "packet_count", 0):
-        text += f" — {bridge.packet_count} packets"
+    # Meme compteur que l'etat : sans cela l'infobulle annonce 0 paquet
+    # pendant que la pastille dit que le jeu est connecte.
+    recus = getattr(bridge, "received_count", None)
+    if recus is None:
+        recus = getattr(bridge, "packet_count", 0)
+    if bridge is not None and recus:
+        text += f" — {recus} packets"
     return text
 
 

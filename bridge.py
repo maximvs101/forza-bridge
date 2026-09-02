@@ -113,6 +113,13 @@ class Bridge(threading.Thread):
         self.stop_event = threading.Event()
         self.bound = threading.Event()  # arme apres la tentative de bind
         self.latest_values: dict[str, float] = {}
+        # Deux compteurs, parce qu'ils repondent a deux questions
+        # differentes : `received_count` = le jeu emet-il ? `packet_count` =
+        # combien de trames ont ete traitees. Avec "seulement en course", en
+        # menu, le second reste a 0 alors que le jeu emet normalement —
+        # l'indicateur annoncait alors "No packets from the game", ce qui
+        # envoyait verifier Data Out sans raison.
+        self.received_count = 0
         self.packet_count = 0
         self.error: str | None = None
 
@@ -270,9 +277,10 @@ class Bridge(threading.Thread):
                 self.rejected_sizes[taille] = self.rejected_sizes.get(taille, 0) + 1
                 continue
 
-            # Signale l'activite AVANT le filtre "seulement en course" : sinon,
-            # en menu, la trame d'etat annoncerait un flux mort alors que le
-            # jeu emet normalement.
+            # Compte et signale l'activite AVANT le filtre "seulement en
+            # course" : sinon, en menu, l'indicateur et la trame d'etat
+            # annonceraient un flux mort alors que le jeu emet normalement.
+            self.received_count += 1
             if self.ws_server is not None:
                 self.ws_server.note_activity()
 
@@ -340,6 +348,8 @@ class Bridge(threading.Thread):
         """Complement du pont a la trame d'etat periodique du serveur."""
         etat = {
             "packets": self.packet_count,
+            # Distinct de `packets` quand "seulement en course" filtre.
+            "packets_received": self.received_count,
             "car_name": self._car_name,
             "is_race_on": bool(self.latest_values.get("is_race_on", 0)),
         }
@@ -373,6 +383,13 @@ class Bridge(threading.Thread):
                 client.send(message)
             except Exception as exc:  # noqa: BLE001 - une target ne doit pas tout arreter
                 self.osc_failures[target] = f"{type(exc).__name__}: {exc}"
+            else:
+                # Efface l'echec precedent : sans cela un seul hoquet reseau
+                # marquait la destination en panne pour toute la session, et
+                # une vraie panne ne se distinguait plus d'un incident passe.
+                # Les destinations jamais resolues, elles, ne figurent pas
+                # dans `_clients_by_target` : leur echec reste affiche.
+                self.osc_failures.pop(target, None)
 
     def _ws_payload(self, values: dict, names) -> dict:
         payload = {name: values[name] for name in names if name in values}

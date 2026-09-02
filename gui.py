@@ -650,7 +650,10 @@ class BridgeGUI:
 
     def _running_status(self) -> str:
         bridge = self.bridge
-        parts = [f"{bridge.packet_count} packets",
+        recus = bridge.received_count
+        compteur = (f"{recus} packets" if recus == bridge.packet_count
+                    else f"{recus} packets ({bridge.packet_count} sent)")
+        parts = [compteur,
                  f"{len(self.selected_channels)} channels",
                  f"OSC {osc_targets.format_targets(bridge.osc_targets)}"]
         if self.ws_server is not None:

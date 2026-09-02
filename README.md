@@ -71,6 +71,10 @@ Three message types: **hello** (channel schema, units, rate — nothing to
 hard-code), **telemetry** (differential by default, complete state every 2 s),
 **status** (every second, doubles as a heartbeat).
 
+`status` carries two counters, not one: `packets_received` answers "is the game
+sending?", `packets` answers "how many frames were forwarded". They differ when
+`--only-racing` filters.
+
 ## Channels
 
 **92 raw channels** plus **20 computed**. Raw channels are never replaced:
@@ -154,7 +158,7 @@ source is not official. `--remove` drops them explicitly.
 python -m unittest discover
 ```
 
-313 tests, standard library only. They cover packet decoding, the catalogue,
+322 tests, standard library only. They cover packet decoding, the catalogue,
 computed channels, smoothing, OSC destinations, the bridge loop, the WebSocket
 server, the interface and the overlay's own JavaScript (that one needs `node`,
 and skips without it).
