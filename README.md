@@ -8,6 +8,14 @@ already scaled for use, and rebroadcasts everything.
 
 ## Quick start
 
+Download `forza-bridge.exe` from the
+[latest release](https://github.com/maximvs101/forza-bridge/releases/latest)
+and run it — no Python needed. Windows will warn about an unsigned program;
+the executable is built from this repository with PyInstaller.
+`forza-bridge-cli.exe` is the same bridge without the interface.
+
+From the sources instead:
+
 ```bash
 pip install -r requirements.txt
 python gui.py
@@ -161,7 +169,7 @@ source is not official. `--remove` drops them explicitly.
 python -m unittest discover
 ```
 
-348 tests, standard library only. They cover packet decoding, the catalogue,
+360 tests, standard library only. They cover packet decoding, the catalogue,
 computed channels, smoothing, OSC destinations, the bridge loop, the WebSocket
 server, the interface and the overlay's own JavaScript (that one needs `node`,
 and skips without it).
@@ -185,6 +193,11 @@ your stream differs, an issue would settle them.
 
 MIT, see [LICENSE](LICENSE). One exception, not mine to license:
 `car_ordinals.json` is derived from the gist credited above.
+
+Settings and the unknown-ordinal log live next to the code when run from the
+sources, and in `%APPDATA%orza-bridge` when run from the executable — a
+PyInstaller build unpacks into a temporary folder that is wiped on exit, so
+writing there would lose every setting without a word.
 
 Comments and docstrings are in French, the author's working language; every
 user-facing string is in English.

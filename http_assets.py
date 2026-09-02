@@ -13,10 +13,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import app_paths
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-WEB_ROOT = (Path(__file__).parent / "web").resolve()
+WEB_ROOT = app_paths.data_path("web").resolve()
 INDEX = "overlay.html"
 
 _CONTENT_TYPES = {

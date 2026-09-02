@@ -22,6 +22,7 @@ from pathlib import Path
 from tkinter import font as tkfont
 from tkinter import ttk
 
+import app_paths
 import car_lookup
 import osc_targets
 import smoothing
@@ -30,7 +31,9 @@ from bridge import Bridge
 from channel_catalog import CATEGORIES, DEFAULT_SELECTION, UNITS
 from ws_server import TelemetryWebSocketServer
 
-CONFIG_PATH = Path(__file__).with_name("config.json")
+# Depuis un executable, ce fichier va dans le dossier de
+# l'utilisateur : le dossier du programme y est temporaire.
+CONFIG_PATH = app_paths.state_path("config.json")
 
 CHECKED, UNCHECKED = "☑", "☐"
 
