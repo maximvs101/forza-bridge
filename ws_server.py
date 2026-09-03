@@ -1,7 +1,7 @@
 """Serveur WebSocket de diffusion de la telemetrie Forza.
 
-Complement a la sortie OSC : ouvre l'acces aux outils web (cables.gl,
-overlay OBS, three.js, p5.js...) qui ne parlent pas OSC.
+Complement a la sortie OSC : ouvre l'acces aux outils web (navigateur,
+overlay de diffusion, moteurs de rendu JavaScript) qui ne parlent pas OSC.
 
 Le serveur tourne dans son propre thread avec sa propre boucle asyncio,
 pour ne pas bloquer la reception UDP. Le code appelant appelle `publish()`
@@ -35,11 +35,11 @@ Ou par commande JSON envoyee ensuite :
   {"subscribe": "*"}                revient a tout recevoir
   {"full": true}                    etat complet a chaque trame, sans fusion
 
-`full` sert aux consommateurs qui traitent chaque message isolement
-(cables.gl et assimiles), ou un champ inchange arriverait "undefined" en mode
-differentiel. PREFERER L'URL pour ces clients-la : dans cables, l'op
-WebSocket publie son port `Connected` avant son port `Connection`, si bien
-qu'un envoi declenche par `Connected` part sans connexion et se perd.
+`full` sert aux consommateurs qui traitent chaque message isolement, sans
+etat accumule : un champ inchange y arriverait "undefined" en mode
+differentiel. PREFERER L'URL pour ces clients-la, car certains signalent leur
+connexion comme etablie avant de pouvoir emettre : une commande envoyee a ce
+moment part sans connexion et se perd en silence.
 """
 
 from __future__ import annotations
@@ -130,9 +130,9 @@ class TelemetryWebSocketServer:
         # connexion -> ensemble de canaux, ou None pour "tout"
         self._subscriptions: dict = {}
         # Connexions qui veulent l'etat complet a chaque trame plutot que les
-        # seules variations. Destine aux consommateurs sans etat accumule
-        # (cables.gl traite chaque message isolement : un champ inchange y
-        # arriverait "undefined").
+        # seules variations. Destine aux consommateurs sans etat accumule, qui
+        # traitent chaque message isolement : un champ inchange y arriverait
+        # "undefined".
         self._full_frames: dict = {}
         # Envois d'etat suivis separement des envois de telemetrie : les deux
         # flux ne doivent pas se bloquer l'un l'autre, mais chacun doit rester
@@ -168,7 +168,7 @@ class TelemetryWebSocketServer:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         if not self._ready.wait(timeout):
-            self.error = self.error or "delai de demarrage depasse"
+            self.error = self.error or "start-up timed out"
         if self.error is not None or self._loop is None:
             self._thread = None
             return False
@@ -180,9 +180,17 @@ class TelemetryWebSocketServer:
             return
         loop, stop_future = self._loop, self._stop_future
         if stop_future is not None:
-            loop.call_soon_threadsafe(
-                lambda: stop_future.done() or stop_future.set_result(None)
-            )
+            try:
+                loop.call_soon_threadsafe(
+                    lambda: stop_future.done() or stop_future.set_result(None)
+                )
+            except RuntimeError:
+                # Meme cause que dans publish() : la boucle peut deja etre
+                # fermee (arret double, ou boucle morte d'elle-meme alors que
+                # `_loop` est encore renseigne). Il n'y a alors plus rien a
+                # arreter, et lever ici ferait echouer la fermeture de
+                # l'interface.
+                pass
         if self._thread is not None:
             self._thread.join(timeout=3)
         self._thread = None
@@ -290,10 +298,10 @@ class TelemetryWebSocketServer:
             ws://hote:port/?full=1&channels=speed,gear
 
         Indispensable pour les clients qui ne savent pas envoyer de commande
-        au bon moment. Dans cables.gl par exemple, l'op WebSocket publie son
-        port `Connected` AVANT son port `Connection` : un envoi declenche par
-        `Connected` part alors que la connexion n'est pas encore transmise,
-        et se perd en silence. L'URL, elle, est lue avant toute trame.
+        au bon moment : certains signalent la connexion comme etablie avant
+        que l'objet de connexion ne soit utilisable, si bien qu'une commande
+        envoyee a cet instant part dans le vide et se perd en silence.
+        L'URL, elle, est lue avant toute trame.
         """
         requete = getattr(connection, "request", None)
         if requete is None or not getattr(requete, "path", None):
@@ -316,7 +324,7 @@ class TelemetryWebSocketServer:
         try:
             # Message d'accueil : schema, unites et cadence, pour qu'un client
             # n'ait pas a coder en dur la liste des canaux.
-            hello = {"type": "hello", "protocol": 1, "source": "forza-td-bridge",
+            hello = {"type": "hello", "protocol": 1, "source": "forza-bridge",
                      "rate_hz": self.rate_hz,
                      # Le client DOIT fusionner les trames partielles quand
                      # ceci vaut true ; les trames completes portent "full".
@@ -427,7 +435,10 @@ class TelemetryWebSocketServer:
         # d'arriver jusqu'ici.
         self.note_activity()
 
-        if self._loop is None or not self._clients:
+        # Une SEULE lecture de `_loop`, gardee dans une locale : relu plus
+        # bas, il pouvait etre remis a None entre-temps par stop().
+        loop = self._loop
+        if loop is None or not self._clients:
             return False
 
         # Cadence planifiee, et non "temps ecoule depuis le dernier envoi" :
@@ -469,7 +480,16 @@ class TelemetryWebSocketServer:
             self.dropped_count += 1
             return False
 
-        self._loop.call_soon_threadsafe(self._broadcast, out, message)
+        try:
+            loop.call_soon_threadsafe(self._broadcast, out, message)
+        except RuntimeError:
+            # `stop()` ferme la boucle asyncio AVANT de remettre `_loop` a
+            # None : entre les deux, cet appel leve "Event loop is closed".
+            # L'exception remontait dans la boucle du pont, qui mourait alors
+            # sur un simple decochage de la case WebSocket pendant que le jeu
+            # emettait. Une trame perdue a l'arret ne merite pas ca.
+            self.dropped_count += 1
+            return False
         return True
 
     @staticmethod

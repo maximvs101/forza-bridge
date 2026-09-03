@@ -24,13 +24,17 @@ import threading
 from functools import lru_cache
 from pathlib import Path
 
+import app_paths
+
 # Publics : `tools/update_car_table.py` ecrit ce que ce module lit, les deux
 # doivent designer le meme fichier.
-DATA_PATH = Path(__file__).with_name("car_ordinals.json")
+DATA_PATH = app_paths.data_path("car_ordinals.json")
 _DATA_PATH = DATA_PATH
 # Ordinaux rencontres mais absents de la table : conserves pour pouvoir
 # completer la liste plus tard, au lieu de decouvrir le manque par hasard.
-UNKNOWN_PATH = Path(__file__).with_name("car_ordinals_unknown.json")
+# Ecrit a l'execution : doit survivre a la fermeture, donc hors du
+# dossier temporaire d'un executable.
+UNKNOWN_PATH = app_paths.state_path("car_ordinals_unknown.json")
 _UNKNOWN_PATH = UNKNOWN_PATH
 
 _inconnus: set[int] = set()
@@ -85,7 +89,7 @@ def describe(ordinal: int | float | None) -> str:
     if ordinal in (None, 0):
         return "-"
     note_unknown(ordinal)
-    return f"Vehicule inconnu (ordinal {int(ordinal)})"
+    return f"Unknown vehicle (ordinal {int(ordinal)})"
 
 
 def _charge_inconnus() -> None:

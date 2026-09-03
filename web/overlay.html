@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>Forza — overlay telemetrie</title>
+<title>Forza — telemetry overlay</title>
 <style>
   :root { --accent: #35a7ff; --warn: #ff6b35; }
   * { box-sizing: border-box; }
@@ -50,20 +50,20 @@
     <div class="gear" id="gear">N</div>
   </div>
   <div>
-    <div class="label">Regime moteur</div>
+    <div class="label">Engine rpm</div>
     <div class="bar rpm"><i id="rpm"></i></div>
   </div>
   <div class="pedals">
     <div>
-      <div class="label">Accelerateur</div>
+      <div class="label">Throttle</div>
       <div class="bar accel"><i id="accel"></i></div>
     </div>
     <div>
-      <div class="label">Frein</div>
+      <div class="label">Brake</div>
       <div class="bar brake"><i id="brake"></i></div>
     </div>
   </div>
-  <div class="status" id="status">Connexion...</div>
+  <div class="status" id="status">Connecting…</div>
 </div>
 
 <script>
@@ -86,7 +86,7 @@ let mode = "";
 // periodique marque "full".
 let state = {};
 let dirty = false;
-let statusText = "Connexion...";
+let statusText = "Connecting…";
 let receiving = null;      // le jeu envoie-t-il encore des paquets ?
 let lastStatus = null;     // date de la derniere trame d'etat recue
 let connected = false;     // liaison WebSocket etablie ?
@@ -104,7 +104,7 @@ function connect() {
   ws.onopen = () => {
     connected = true;
     bridgeAlive = true;
-    statusText = `Connecte a ws://${HOST}:${PORT} — attente de l'accueil`;
+    statusText = `Connected to ws://${HOST}:${PORT} — awaiting hello`;
     dirty = true;
   };
 
@@ -126,7 +126,7 @@ function connect() {
       if (d.status_interval) statusInterval = d.status_interval;
       totalChannels = (d.channels || []).length;
       channelCount = totalChannels;
-      mode = d.differential ? "differentiel" : "complet";
+      mode = d.differential ? "differential" : "full frames";
       if (d.car_name) state.car_name = d.car_name;
       // Cet overlay n'affiche que six valeurs : inutile d'en recevoir 88.
       if (d.subscribe_supported) {
@@ -165,7 +165,7 @@ function connect() {
 
   ws.onclose = () => {
     connected = false;
-    statusText = "Deconnecte — nouvelle tentative dans 2 s";
+    statusText = "Disconnected — retrying in 2 s";
     dirty = true;
     setTimeout(connect, 2000);
   };
@@ -193,14 +193,14 @@ function paint() {
     status.textContent = statusText;
     status.classList.add("err");
   } else if (!bridgeAlive) {
-    status.textContent = "Pont injoignable — aucune trame d'etat";
+    status.textContent = "Bridge unreachable — no status frame";
     status.classList.add("err");
   } else if (receiving === false) {
-    status.textContent = "Jeu a l'arret — aucun paquet recu";
+    status.textContent = "Game idle — no packets received";
     status.classList.add("stale");
   } else if (rateHz !== null) {
     status.textContent =
-      `Connecte — ${channelCount}/${totalChannels} canaux a ${rateHz} Hz (${mode})`;
+      `Connected — ${channelCount}/${totalChannels} channels at ${rateHz} Hz (${mode})`;
   } else {
     status.textContent = statusText;
   }

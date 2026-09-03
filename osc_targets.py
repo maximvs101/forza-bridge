@@ -1,103 +1,105 @@
 """Analyse et mise en forme des destinations OSC.
 
-Definition UNIQUE du format "hote:port", consommee par la ligne de commande
+Definition UNIQUE du format "host:port", consommee par la ligne de commande
 et par l'interface. Les deux avaient leur propre copie, et elles avaient
 diverge des la naissance : l'interface acceptait une liste separee par des
 virgules que la ligne de commande refusait, si bien que la chaine enregistree
 dans config.json ne pouvait pas etre recopiee en `--osc`.
 
-Meme decoupage que `smoothing.parse_reglages` / `formate_reglages` : une
+Meme decoupage que `smoothing.parse_settings` / `format_settings` : une
 fonction leve, chaque point d'entree presente l'erreur a sa facon.
+
+Les messages d'erreur sont AFFICHES : ils sont donc en anglais.
 """
 
 from __future__ import annotations
 
 import socket
 
-CIBLE_PAR_DEFAUT: tuple[str, int] = ("127.0.0.1", 7000)
+DEFAULT_TARGET: tuple[str, int] = ("127.0.0.1", 7000)
 
 PORT_MIN, PORT_MAX = 1, 65535
 
 
-class CibleInvalide(ValueError):
+class InvalidTarget(ValueError):
     """Destination inexploitable. Le message est destine a l'utilisateur."""
 
 
-def parse_cible(texte: str) -> tuple[str, int]:
-    """Analyse une destination "hote:port".
+def parse_target(text: str) -> tuple[str, int]:
+    """Analyse une destination "host:port".
 
     Accepte la forme IPv6 entre crochets (`[::1]:7000`). Une adresse IPv6
     nue est refusee : `rpartition(":")` en tirerait l'hote `::` et le port
     `1`, une destination acceptee en silence vers un port que personne n'a
     demande.
     """
-    texte = texte.strip()
-    if not texte:
-        raise CibleInvalide("destination vide")
+    text = text.strip()
+    if not text:
+        raise InvalidTarget("empty destination")
 
-    if texte.startswith("["):
-        fermeture = texte.find("]")
-        if fermeture == -1 or not texte[fermeture + 1:].startswith(":"):
-            raise CibleInvalide(
-                f"\"{texte}\" : forme IPv6 attendue [adresse]:port")
-        hote, port_texte = texte[1:fermeture], texte[fermeture + 2:]
+    if text.startswith("["):
+        closing = text.find("]")
+        if closing == -1 or not text[closing + 1:].startswith(":"):
+            raise InvalidTarget(
+                f"\"{text}\": expected IPv6 form [address]:port")
+        host, port_text = text[1:closing], text[closing + 2:]
     else:
-        hote, separateur, port_texte = texte.rpartition(":")
-        if not separateur:
-            raise CibleInvalide(f"\"{texte}\" : port manquant (attendu hote:port)")
-        if ":" in hote:
-            # Ne pas tenter de reconstruire la suggestion depuis le decoupage :
-            # il est deja faux, c'est precisement le probleme.
-            raise CibleInvalide(
-                f"\"{texte}\" : adresse IPv6 a mettre entre crochets, "
-                f"par exemple [::1]:7000")
+        host, separator, port_text = text.rpartition(":")
+        if not separator:
+            raise InvalidTarget(f"\"{text}\": missing port (expected host:port)")
+        if ":" in host:
+            # Ne pas suggerer la forme issue du mauvais decoupage : elle est
+            # deja fausse, c'est precisement le probleme.
+            raise InvalidTarget(
+                f"\"{text}\": IPv6 address must be bracketed, "
+                f"for example [::1]:7000")
 
-    hote = hote.strip()
-    if not hote:
-        raise CibleInvalide(
-            f"\"{texte}\" : hote manquant. Un hote vide est resolu vers une "
-            f"interface locale et l'envoi echoue ensuite silencieusement.")
+    host = host.strip()
+    if not host:
+        raise InvalidTarget(
+            f"\"{text}\": missing host. An empty host resolves to a local "
+            f"interface and sending then fails silently.")
 
     # `int()` dans un try, et non `isdigit()` : ce dernier est vrai pour des
     # caracteres que `int()` refuse ('²'.isdigit() vaut True), ce qui
     # faisait lever une ValueError nue au lieu d'afficher ce message.
     try:
-        port = int(port_texte.strip())
+        port = int(port_text.strip())
     except ValueError:
-        raise CibleInvalide(f"\"{texte}\" : port non numerique") from None
+        raise InvalidTarget(f"\"{text}\": port is not a number") from None
     if not (PORT_MIN <= port <= PORT_MAX):
-        raise CibleInvalide(
-            f"\"{texte}\" : port hors plage ({PORT_MIN}-{PORT_MAX})")
+        raise InvalidTarget(
+            f"\"{text}\": port out of range ({PORT_MIN}-{PORT_MAX})")
 
-    return hote, port
+    return host, port
 
 
-def parse_cibles(texte: str) -> list[tuple[str, int]]:
-    """Analyse "hote:port, hote:port". Doublons retires, ordre conserve.
+def parse_targets(text: str) -> list[tuple[str, int]]:
+    """Analyse "host:port, host:port". Doublons retires, ordre conserve.
 
     Deux fois la meme destination ouvrirait deux sockets et doublerait
     reellement le trafic vers le meme point d'arrivee.
     """
-    cibles: list[tuple[str, int]] = []
-    for morceau in texte.replace(";", ",").split(","):
-        if morceau.strip():
-            cibles.append(parse_cible(morceau))
-    if not cibles:
-        raise CibleInvalide("aucune destination OSC")
-    return list(dict.fromkeys(cibles))
+    targets: list[tuple[str, int]] = []
+    for chunk in text.replace(";", ",").split(","):
+        if chunk.strip():
+            targets.append(parse_target(chunk))
+    if not targets:
+        raise InvalidTarget("no OSC destination")
+    return list(dict.fromkeys(targets))
 
 
-def formate_cible(cible: tuple[str, int]) -> str:
-    hote, port = cible
+def format_target(target: tuple[str, int]) -> str:
+    host, port = target
     # Les crochets sont necessaires pour que la chaine puisse etre relue.
-    return f"[{hote}]:{port}" if ":" in hote else f"{hote}:{port}"
+    return f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
 
 
-def formate_cibles(cibles) -> str:
-    return ", ".join(formate_cible(cible) for cible in cibles)
+def format_targets(targets) -> str:
+    return ", ".join(format_target(target) for target in targets)
 
 
-def resout(cible: tuple[str, int]) -> tuple[str, int]:
+def resolve(target: tuple[str, int]) -> tuple[str, int]:
     """Remplace un nom d'hote par son adresse numerique.
 
     python-osc resout le nom dans son constructeur puis JETTE le resultat :
@@ -106,6 +108,6 @@ def resout(cible: tuple[str, int]) -> tuple[str, int]:
     numerique contre 167,7 us vers "localhost", soit 48 fois plus — a
     ~5400 messages par seconde, la boucle de reception ne suivrait pas.
     """
-    hote, port = cible
-    infos = socket.getaddrinfo(hote, port, type=socket.SOCK_DGRAM)
+    host, port = target
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_DGRAM)
     return infos[0][4][0], port

@@ -9,7 +9,9 @@ config.json
 # Ordinaux de vehicules rencontres et absents de la table : trace locale,
 # propre a la partie jouee.
 car_ordinals_unknown.json
-tests/_config_test.json
+# Configurations jetables des tests d'interface : supprimees en tearDown,
+# mais un test interrompu en laisse une derriere lui.
+tests/_config_*.json
 tests/_inconnus_test.json
 # Fichiers temporaires d'ecriture atomique
 *.json.tmp

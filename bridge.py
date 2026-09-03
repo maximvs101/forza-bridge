@@ -25,10 +25,12 @@ from pythonosc.udp_client import SimpleUDPClient
 
 import car_lookup
 import derived_channels
-import osc_targets as osc_targets_mod
 import smoothing
+# Symboles importes directement : le parametre `osc_targets` de Bridge
+# masquerait un import du module homonyme.
+from osc_targets import DEFAULT_TARGET, resolve as resolve_target
 from channel_catalog import ALL_CHANNELS, CATEGORY_OF, UNITS
-from forza_telemetry import parse
+from forza_telemetry import ACCEPTED_SIZES, parse
 
 OSC_ADDRESS_PREFIX = "/forza"
 
@@ -40,14 +42,13 @@ WS_CONTEXT_FIELDS = ("engine_max_rpm", "is_race_on")
 _INT32_MIN, _INT32_MAX = -(2 ** 31), 2 ** 31 - 1
 
 
-def _type_osc(value):
+def _osc_type(value):
     """Type OSC a imposer, ou None pour laisser python-osc decider.
 
     python-osc emet `,i` (int32) sous 2^31 et bascule sur `,h` (int64)
-    au-dela. Tous les recepteurs ne decodent pas `h` de facon fiable — l'OSC
-    In CHOP de TouchDesigner, par exemple, laisse alors le canal cesser de se
-    mettre a jour sans erreur. `timestamp_ms` franchit ce seuil apres
-    ~24,8 jours de fonctionnement.
+    au-dela. Tous les recepteurs ne decodent pas `h` de facon fiable :
+    certains laissent alors le canal cesser de se mettre a jour, sans erreur.
+    `timestamp_ms` franchit ce seuil apres ~24,8 jours de fonctionnement.
 
     On force alors le type `d` (double, 64 bits). Convertir en `float` sans
     plus de precaution ne suffit PAS : python-osc encode tout flottant
@@ -78,7 +79,7 @@ class Bridge(threading.Thread):
                  ws_server=None, osc_clients=None, derived: bool = True,
                  smoothing_settings: dict[str, float] | None = None):
         super().__init__(daemon=True)
-        # Canaux calcules (unites usuelles, grandeurs bornees) ajoutes aux
+        # Canaux calcules (units usuelles, grandeurs bornees) ajoutes aux
         # canaux bruts. Voir derived_channels.py.
         self.derived = derived
         # Lissage applique APRES les derives : on peut ainsi adoucir
@@ -89,18 +90,20 @@ class Bridge(threading.Thread):
         self.selected_channels = selected_channels
         self.only_racing = only_racing
         self.send_car_name = send_car_name
-        self.ws_server = ws_server
+        # `ws_server` est branche plus bas par attach_ws_server(), une fois les
+        # attributs dont dependent hello() et status() en place.
+        self.ws_server = None
         # Doublons retires : deux fois la meme destination ouvrirait deux
         # sockets et doublerait reellement le trafic vers le meme point.
-        cibles = list(dict.fromkeys(
-            osc_targets if osc_targets is not None else [osc_targets_mod.CIBLE_PAR_DEFAUT]))
-        if osc_clients is None and not cibles:
-            raise ValueError("aucune destination OSC")
-        self._cibles_demandees = cibles
+        targets = list(dict.fromkeys(
+            osc_targets if osc_targets is not None else [DEFAULT_TARGET]))
+        if osc_clients is None and not targets:
+            raise ValueError("no OSC destination")
+        self._requested_targets = targets
 
         # Clients injectables pour les tests. Sinon ils sont construits dans
         # run(), PAS ici : SimpleUDPClient resout le DNS dans son
-        # constructeur, ce qui bloquait le thread appelant (l'interface
+        # builder, ce qui bloquait le thread appelant (l'interface
         # graphique) et faisait remonter socket.gaierror hors de son rappel.
         self.osc_clients = list(osc_clients) if osc_clients is not None else []
         self._clients_fournis = osc_clients is not None
@@ -110,14 +113,45 @@ class Bridge(threading.Thread):
         self.stop_event = threading.Event()
         self.bound = threading.Event()  # arme apres la tentative de bind
         self.latest_values: dict[str, float] = {}
+        # Deux compteurs, parce qu'ils repondent a deux questions
+        # differentes : `received_count` = le jeu emet-il ? `packet_count` =
+        # combien de trames ont ete traitees. Avec "seulement en course", en
+        # menu, le second reste a 0 alors que le jeu emet normalement —
+        # l'indicateur annoncait alors "No packets from the game", ce qui
+        # envoyait verifier Data Out sans raison.
+        self.received_count = 0
         self.packet_count = 0
         self.error: str | None = None
 
+        # Paquets recus mais refuses par le decodeur, avec leurs tailles. Sans
+        # ce compteur, une variante de paquet inconnue (le jeu peut publier
+        # l'usure des pneus, ce qui change la taille) donnait un silence
+        # complet : l'interface affichait "No packets from the game" alors que
+        # les paquets arrivaient. Une taille affichee est un diagnostic.
+        self.rejected_count = 0
+        self.rejected_sizes: dict[int, int] = {}
+
         self._last_ordinal: int | None = None
         self._car_name: str = "-"
+        # Etabli par run(), mais defini des ici : `_emit` s'en sert, et un
+        # appel avant le demarrage levait AttributeError au lieu de ne rien
+        # faire.
+        self._clients_by_target: list = []
 
-        # Le serveur ne connait pas les canaux emis : c'est le pont qui
-        # fournit le contenu du message d'accueil.
+        self.attach_ws_server(ws_server)
+
+    def attach_ws_server(self, ws_server) -> None:
+        """Branche (ou debranche) le serveur WebSocket.
+
+        Le serveur ne connait pas les canaux emis : c'est le pont qui fournit
+        le contenu du message d'accueil et de la trame d'etat. Passer par
+        cette methode plutot que d'affecter `ws_server` directement, sinon les
+        fabriques manquent : mesure sur le jeu, un serveur demarre a chaud par
+        la case de l'interface annoncait alors 0 canal, aucun vehicule et
+        `packets: null` — le flux de telemetrie fonctionnait, ce qui rendait le
+        defaut discret.
+        """
+        self.ws_server = ws_server
         if ws_server is not None:
             ws_server.hello_factory = self.hello
             ws_server.status_factory = self.status
@@ -127,7 +161,7 @@ class Bridge(threading.Thread):
         """Destinations demandees. Derivee, jamais stockee en double :
         l'ancien attribut annoncait la valeur par defaut alors que des
         clients injectes emettaient ailleurs."""
-        return list(self._cibles_demandees)
+        return list(self._requested_targets)
 
     @property
     def car_name(self) -> str:
@@ -141,23 +175,23 @@ class Bridge(threading.Thread):
         for name in WS_CONTEXT_FIELDS:
             if name not in names:
                 names.append(name)
-        unites = {n: UNITS[n] for n in names if n in UNITS}
+        units = {n: UNITS[n] for n in names if n in UNITS}
         categories = {n: CATEGORY_OF[n] for n in names if n in CATEGORY_OF}
 
         # Les canaux lisses portent l'unite et la categorie de leur source.
-        for lisse in self.smoother.canaux_produits:
-            if lisse in names:
+        for smoothed in self.smoother.produced_channels:
+            if smoothed in names:
                 continue
-            names.append(lisse)
-            source = lisse[:-len(smoothing.SUFFIXE)]
+            names.append(smoothed)
+            source = smoothed[:-len(smoothing.SUFFIX)]
             if source in UNITS:
-                unites[lisse] = UNITS[source]
+                units[smoothed] = UNITS[source]
             if source in CATEGORY_OF:
-                categories[lisse] = CATEGORY_OF[source]
+                categories[smoothed] = CATEGORY_OF[source]
 
         return {
             "channels": names,
-            "units": unites,
+            "units": units,
             "categories": categories,
             "car_name": self._car_name,
             "packet_count": self.packet_count,
@@ -166,7 +200,7 @@ class Bridge(threading.Thread):
     def stop(self) -> None:
         self.stop_event.set()
 
-    def _construit_clients(self) -> None:
+    def _build_clients(self) -> None:
         """Resout chaque destination une fois, puis ouvre les sockets.
 
         La resolution est faite ici pour deux raisons : ne pas figer le thread
@@ -175,33 +209,62 @@ class Bridge(threading.Thread):
         repasse la chaine d'origine a `sendto`.
         """
         clients = []
-        for cible in self._cibles_demandees:
+        for target in self._requested_targets:
             try:
-                hote, port = osc_targets_mod.resout(cible)
+                hote, port = resolve_target(target)
             except OSError as exc:
                 # Une destination injoignable ne doit pas empecher les autres
                 # de fonctionner : on la note et on continue.
-                self.osc_failures[cible] = f"resolution impossible: {exc}"
+                self.osc_failures[target] = f"cannot resolve: {exc}"
                 continue
-            clients.append((cible, SimpleUDPClient(hote, port)))
-        self._clients_par_cible = clients
+            clients.append((target, SimpleUDPClient(hote, port)))
+        self._clients_by_target = clients
         self.osc_clients = [client for _, client in clients]
 
+    def _close_clients(self) -> None:
+        """Ferme les sockets OSC ouverts par le pont.
+
+        Un client par destination et par demarrage : sans fermeture, chaque
+        cycle Start/Stop laissait un socket UDP ouvert jusqu'au passage du
+        ramasse-miettes (ResourceWarning visible en test). `SimpleUDPClient`
+        expose bien un `close()` public.
+
+        Les clients INJECTES appartiennent a l'appelant : on n'y touche pas.
+        """
+        if self._clients_fournis:
+            return
+        for client in self.osc_clients:
+            fermer = getattr(client, "close", None)
+            if not callable(fermer):
+                continue
+            try:
+                fermer()
+            except Exception:  # noqa: BLE001 - une fermeture ne doit rien casser
+                pass
+
     def run(self) -> None:
+        try:
+            self._execute()
+        finally:
+            # Toutes les sorties passent par ici, l'echec de bind compris :
+            # sinon un port deja pris laissait les sockets OSC ouverts.
+            self._close_clients()
+
+    def _execute(self) -> None:
         if not self._clients_fournis:
-            self._construit_clients()
+            self._build_clients()
             if not self.osc_clients:
-                self.error = ("aucune destination OSC joignable : "
+                self.error = ("no reachable OSC destination: "
                               + " ; ".join(self.osc_failures.values()))
                 self.bound.set()
                 return
         else:
-            # Chaque client doit etre servi, meme si la liste des cibles est
+            # Chaque client doit etre servi, meme si la liste des targets est
             # plus courte : un `zip` tronquerait a la plus courte des deux et
             # les clients au-dela ne recevraient jamais rien.
-            cibles = self._cibles_demandees
-            self._clients_par_cible = [
-                (cibles[indice] if indice < len(cibles) else ("client", indice),
+            targets = self._requested_targets
+            self._clients_by_target = [
+                (targets[indice] if indice < len(targets) else ("client", indice),
                  client)
                 for indice, client in enumerate(self.osc_clients)]
 
@@ -239,25 +302,43 @@ class Bridge(threading.Thread):
 
             frame = parse(packet)
             if frame is None:
+                # Compte et retient la taille : c'est la seule information qui
+                # permette de distinguer "le jeu n'emet pas" de "le jeu emet
+                # une variante que nous ne savons pas lire".
+                self.rejected_count += 1
+                taille = len(packet)
+                self.rejected_sizes[taille] = self.rejected_sizes.get(taille, 0) + 1
                 continue
 
-            # Signale l'activite AVANT le filtre "seulement en course" : sinon,
-            # en menu, la trame d'etat annoncerait un flux mort alors que le
-            # jeu emet normalement.
+            # Compte et signale l'activite AVANT le filtre "seulement en
+            # course" : sinon, en menu, l'indicateur et la trame d'etat
+            # annonceraient un flux mort alors que le jeu emet normalement.
+            self.received_count += 1
             if self.ws_server is not None:
                 self.ws_server.note_activity()
-
-            if self.only_racing and not frame.is_race_on:
-                continue
 
             values = frame.values
             if self.derived:
                 # Fusionnes aux canaux bruts : tout l'aval (OSC, WebSocket,
                 # interface, accueil) les traite sans rien de particulier.
                 values = {**values, **derived_channels.compute(values)}
-            if self.smoother.actif:
-                values = self.smoother.apply(values, time.monotonic())
+
+            # L'AFFICHAGE est mis a jour avant le filtre : il doit montrer ce
+            # que le jeu envoie, meme quand "seulement en course" empeche de
+            # le retransmettre. Sinon le tableau restait fige sur la derniere
+            # trame en course — vitesse d'il y a dix minutes affichee comme
+            # courante — et `is_race_on` de la trame d'etat restait bloque a
+            # vrai, puisqu'il est lu ici.
             self.latest_values = values
+
+            if self.only_racing and not frame.is_race_on:
+                continue
+
+            if self.smoother.active:
+                # Le lissage porte sur le flux EMIS : l'appliquer aux trames
+                # filtrees ferait deriver son etat sur des zeros de menu.
+                values = self.smoother.apply(values, time.monotonic())
+                self.latest_values = values
             self.packet_count += 1
 
             # Instantane : `selected_channels` peut etre reaffecte par
@@ -269,8 +350,8 @@ class Bridge(threading.Thread):
                 # Les canaux lisses ne figurent pas au catalogue : les
                 # configurer vaut demande explicite, ils accompagnent donc
                 # toujours la selection.
-                lisses = self.smoother.canaux_produits
-                names = selected if not lisses else selected.union(lisses)
+                smoothed = self.smoother.produced_channels
+                names = selected if not smoothed else selected.union(smoothed)
 
             ordinal = values.get("car_ordinal")
             if ordinal != self._last_ordinal:
@@ -278,30 +359,52 @@ class Bridge(threading.Thread):
                 self._car_name = car_lookup.describe(ordinal)
                 self.smoother.reset()
                 if self.send_car_name:
-                    # Chaine de caracteres : certains recepteurs n'acceptent
-                    # que des nombres sur leur entree principale (dans
-                    # TouchDesigner par exemple, il faut un OSC In DAT).
-                    self._emet(f"{OSC_ADDRESS_PREFIX}/car_name", self._car_name)
+                    # Chaine de caracteres : certains recepteurs OSC
+                    # n'acceptent que des nombres sur leur entree principale
+                    # et l'ignorent, ou exigent une entree dediee.
+                    self._emit(f"{OSC_ADDRESS_PREFIX}/car_name", self._car_name)
 
             for name in names:
                 value = values.get(name)
                 if value is not None:
-                    self._emet(f"{OSC_ADDRESS_PREFIX}/{name}", value)
+                    self._emit(f"{OSC_ADDRESS_PREFIX}/{name}", value)
 
             if self.ws_server is not None:
                 # Charge utile construite paresseusement : le serveur limite
                 # la cadence et n'appellera cette fabrique que s'il emet.
                 self.ws_server.publish(lambda: self._ws_payload(values, names))
 
+    def rejected_summary(self) -> str | None:
+        """Phrase a afficher quand des paquets ont ete refuses, sinon None.
+
+        Une taille inconnue n'est pas une anomalie a taire : c'est exactement
+        ce qu'il faut savoir pour comprendre pourquoi rien n'arrive.
+        """
+        if not self.rejected_count:
+            return None
+        tailles = sorted(self.rejected_sizes.items(),
+                         key=lambda kv: kv[1], reverse=True)
+        detail = ", ".join(f"{taille} B" for taille, _ in tailles[:3])
+        return (f"{self.rejected_count} packet(s) of unsupported size "
+                f"({detail}); expected {sorted(ACCEPTED_SIZES)}")
+
     def status(self) -> dict:
         """Complement du pont a la trame d'etat periodique du serveur."""
-        return {
+        etat = {
             "packets": self.packet_count,
+            # Distinct de `packets` quand "seulement en course" filtre.
+            "packets_received": self.received_count,
             "car_name": self._car_name,
             "is_race_on": bool(self.latest_values.get("is_race_on", 0)),
         }
+        # Champs absents quand tout va bien : un client n'a pas a filtrer des
+        # zeros pour savoir s'il y a un probleme.
+        if self.rejected_count:
+            etat["rejected"] = self.rejected_count
+            etat["rejected_sizes"] = dict(self.rejected_sizes)
+        return etat
 
-    def _emet(self, adresse: str, valeur) -> None:
+    def _emit(self, address: str, value) -> None:
         """Envoie un message OSC a toutes les destinations.
 
         Le message est encode UNE seule fois : avec plusieurs destinations,
@@ -311,19 +414,26 @@ class Bridge(threading.Thread):
         (console eteinte, lien sature) tuait le thread et arretait aussi
         toutes les autres destinations ET la diffusion WebSocket.
         """
-        constructeur = OscMessageBuilder(address=adresse)
-        type_impose = _type_osc(valeur)
-        if type_impose is None:
-            constructeur.add_arg(valeur)
+        builder = OscMessageBuilder(address=address)
+        forced_type = _osc_type(value)
+        if forced_type is None:
+            builder.add_arg(value)
         else:
-            constructeur.add_arg(float(valeur), arg_type=type_impose)
-        message = constructeur.build()
+            builder.add_arg(float(value), arg_type=forced_type)
+        message = builder.build()
 
-        for cible, client in self._clients_par_cible:
+        for target, client in self._clients_by_target:
             try:
                 client.send(message)
-            except Exception as exc:  # noqa: BLE001 - une cible ne doit pas tout arreter
-                self.osc_failures[cible] = f"{type(exc).__name__}: {exc}"
+            except Exception as exc:  # noqa: BLE001 - une target ne doit pas tout arreter
+                self.osc_failures[target] = f"{type(exc).__name__}: {exc}"
+            else:
+                # Efface l'echec precedent : sans cela un seul hoquet reseau
+                # marquait la destination en panne pour toute la session, et
+                # une vraie panne ne se distinguait plus d'un incident passe.
+                # Les destinations jamais resolues, elles, ne figurent pas
+                # dans `_clients_by_target` : leur echec reste affiche.
+                self.osc_failures.pop(target, None)
 
     def _ws_payload(self, values: dict, names) -> dict:
         payload = {name: values[name] for name in names if name in values}

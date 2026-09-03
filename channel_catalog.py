@@ -1,5 +1,9 @@
 """Catalogue des canaux de telemetrie exposes dans l'interface.
 
+Les noms de categories et les libelles d'unites sont AFFICHES (interface,
+message d'accueil WebSocket) : ils sont donc en anglais,
+comme le reste de ce que voit l'utilisateur.
+
 Regroupe les champs de forza_telemetry.py par categorie pour l'affichage,
 et definit une selection par defaut ("essentiels") pour un demarrage rapide.
 Sert aussi a publier les unites dans le message d'accueil WebSocket.
@@ -9,20 +13,20 @@ from derived_channels import DERIVED_CHANNELS, DERIVED_UNITS
 
 CATEGORIES: dict[str, list[str]] = {
     "General": ["is_race_on", "timestamp_ms"],
-    "Moteur": ["engine_max_rpm", "engine_idle_rpm", "current_engine_rpm"],
-    "Mouvement": [
+    "Engine": ["engine_max_rpm", "engine_idle_rpm", "current_engine_rpm"],
+    "Motion": [
         "acceleration_x", "acceleration_y", "acceleration_z",
         "velocity_x", "velocity_y", "velocity_z",
         "angular_velocity_x", "angular_velocity_y", "angular_velocity_z",
         "yaw", "pitch", "roll",
     ],
-    "Position / course": [
+    "Position / race": [
         "position_x", "position_y", "position_z",
         "speed", "power", "torque",
         "distance_traveled", "best_lap_time", "last_lap_time",
         "current_lap_time", "current_race_time", "lap_number", "race_position",
     ],
-    "Commandes": [
+    "Controls": [
         "accel", "brake", "clutch", "hand_brake", "gear",
         "steer", "norm_driving_line", "norm_ai_brake_difference", "boost", "fuel",
     ],
@@ -32,11 +36,15 @@ CATEGORIES: dict[str, list[str]] = {
         "suspension_travel_meters_fl", "suspension_travel_meters_fr",
         "suspension_travel_meters_rl", "suspension_travel_meters_rr",
     ],
-    "Pneus": [
+    "Tyres": [
         "tire_slip_ratio_fl", "tire_slip_ratio_fr", "tire_slip_ratio_rl", "tire_slip_ratio_rr",
         "tire_slip_angle_fl", "tire_slip_angle_fr", "tire_slip_angle_rl", "tire_slip_angle_rr",
         "tire_combined_slip_fl", "tire_combined_slip_fr", "tire_combined_slip_rl", "tire_combined_slip_rr",
         "tire_temp_fl", "tire_temp_fr", "tire_temp_rl", "tire_temp_rr",
+        # Presents seulement dans les paquets de 339 octets : absents du flux
+        # mesure (324 octets), donc leur ligne reste vide dans l'interface
+        # tant que le jeu ne les envoie pas.
+        "tire_wear_fl", "tire_wear_fr", "tire_wear_rl", "tire_wear_rr",
         "wheel_rotation_speed_fl", "wheel_rotation_speed_fr",
         "wheel_rotation_speed_rl", "wheel_rotation_speed_rr",
         "wheel_on_rumble_strip_fl", "wheel_on_rumble_strip_fr",
@@ -44,7 +52,7 @@ CATEGORIES: dict[str, list[str]] = {
         "wheel_in_puddle_fl", "wheel_in_puddle_fr", "wheel_in_puddle_rl", "wheel_in_puddle_rr",
         "surface_rumble_fl", "surface_rumble_fr", "surface_rumble_rl", "surface_rumble_rr",
     ],
-    "Vehicule": [
+    "Vehicle": [
         "car_ordinal", "car_class", "car_performance_index",
         "drivetrain_type", "num_cylinders", "car_category",
     ],
@@ -52,7 +60,7 @@ CATEGORIES: dict[str, list[str]] = {
     # communaute. Ils etaient auparavant absents du catalogue tout en etant
     # emis par main.py : deux canaux etaient donc diffuses sans figurer
     # dans aucune liste. Listes ici, et decoches par defaut.
-    "Non documente": [
+    "Undocumented": [
         "horizon_unknown_1", "horizon_unknown_2",
     ],
 }
@@ -63,7 +71,7 @@ RAW_CHANNELS: list[str] = [name for names in CATEGORIES.values() for name in nam
 # Canaux calcules par le pont (unites usuelles, grandeurs bornees). Ajoutes au
 # catalogue pour apparaitre dans l'interface et le message d'accueil comme
 # n'importe quel autre canal.
-CATEGORIES["Derives"] = list(DERIVED_CHANNELS)
+CATEGORIES["Derived"] = list(DERIVED_CHANNELS)
 
 ALL_CHANNELS: list[str] = [name for names in CATEGORIES.values() for name in names]
 
@@ -78,9 +86,9 @@ UNITS: dict[str, str] = {
     "speed": "m/s",
     "power": "W",
     "torque": "N.m",
-    "current_engine_rpm": "tr/min",
-    "engine_max_rpm": "tr/min",
-    "engine_idle_rpm": "tr/min",
+    "current_engine_rpm": "rpm",
+    "engine_max_rpm": "rpm",
+    "engine_idle_rpm": "rpm",
     "acceleration_x": "m/s2", "acceleration_y": "m/s2", "acceleration_z": "m/s2",
     "velocity_x": "m/s", "velocity_y": "m/s", "velocity_z": "m/s",
     "angular_velocity_x": "rad/s", "angular_velocity_y": "rad/s", "angular_velocity_z": "rad/s",
@@ -91,6 +99,10 @@ UNITS: dict[str, str] = {
     "current_lap_time": "s", "current_race_time": "s",
     "tire_temp_fl": "degF", "tire_temp_fr": "degF",
     "tire_temp_rl": "degF", "tire_temp_rr": "degF",
+    "tire_wear_fl": "0-1 (339-byte packets only)",
+    "tire_wear_fr": "0-1 (339-byte packets only)",
+    "tire_wear_rl": "0-1 (339-byte packets only)",
+    "tire_wear_rr": "0-1 (339-byte packets only)",
     "suspension_travel_meters_fl": "m", "suspension_travel_meters_fr": "m",
     "suspension_travel_meters_rl": "m", "suspension_travel_meters_rr": "m",
     "wheel_rotation_speed_fl": "rad/s", "wheel_rotation_speed_fr": "rad/s",
@@ -98,52 +110,52 @@ UNITS: dict[str, str] = {
     "accel": "0-255", "brake": "0-255", "clutch": "0-255", "hand_brake": "0-255",
     "steer": "-127..127",
     "norm_driving_line": "-127..127", "norm_ai_brake_difference": "-127..127",
-    "gear": "rapport (0 = marche arriere)",
+    "gear": "gear (0 = reverse)",
     "timestamp_ms": "ms",
     "is_race_on": "0/1",
 
     # Grandeurs sans dimension : le declarer explicitement evite qu'un
     # consommateur confonde "sans unite" et "unite oubliee".
-    "boost": "sans dimension",
+    "boost": "dimensionless",
     "fuel": "fraction 0-1",
-    "lap_number": "numero de tour",
-    "race_position": "place",
-    "norm_suspension_travel_fl": "0-1 (0 = detente max, 1 = compression max)",
-    "norm_suspension_travel_fr": "0-1 (0 = detente max, 1 = compression max)",
-    "norm_suspension_travel_rl": "0-1 (0 = detente max, 1 = compression max)",
-    "norm_suspension_travel_rr": "0-1 (0 = detente max, 1 = compression max)",
-    "tire_slip_ratio_fl": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_slip_ratio_fr": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_slip_ratio_rl": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_slip_ratio_rr": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_slip_angle_fl": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_slip_angle_fr": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_slip_angle_rl": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_slip_angle_rr": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_combined_slip_fl": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_combined_slip_fr": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_combined_slip_rl": "normalise (|x| > 1 = perte d'adherence)",
-    "tire_combined_slip_rr": "normalise (|x| > 1 = perte d'adherence)",
+    "lap_number": "lap number",
+    "race_position": "position",
+    "norm_suspension_travel_fl": "0-1 (0 = full extension, 1 = full compression)",
+    "norm_suspension_travel_fr": "0-1 (0 = full extension, 1 = full compression)",
+    "norm_suspension_travel_rl": "0-1 (0 = full extension, 1 = full compression)",
+    "norm_suspension_travel_rr": "0-1 (0 = full extension, 1 = full compression)",
+    "tire_slip_ratio_fl": "normalised (|x| > 1 = grip loss)",
+    "tire_slip_ratio_fr": "normalised (|x| > 1 = grip loss)",
+    "tire_slip_ratio_rl": "normalised (|x| > 1 = grip loss)",
+    "tire_slip_ratio_rr": "normalised (|x| > 1 = grip loss)",
+    "tire_slip_angle_fl": "normalised (|x| > 1 = grip loss)",
+    "tire_slip_angle_fr": "normalised (|x| > 1 = grip loss)",
+    "tire_slip_angle_rl": "normalised (|x| > 1 = grip loss)",
+    "tire_slip_angle_rr": "normalised (|x| > 1 = grip loss)",
+    "tire_combined_slip_fl": "normalised (|x| > 1 = grip loss)",
+    "tire_combined_slip_fr": "normalised (|x| > 1 = grip loss)",
+    "tire_combined_slip_rl": "normalised (|x| > 1 = grip loss)",
+    "tire_combined_slip_rr": "normalised (|x| > 1 = grip loss)",
     "wheel_on_rumble_strip_fl": "0/1",
     "wheel_on_rumble_strip_fr": "0/1",
     "wheel_on_rumble_strip_rl": "0/1",
     "wheel_on_rumble_strip_rr": "0/1",
-    "wheel_in_puddle_fl": "0-1 (1 = flaque la plus profonde)",
-    "wheel_in_puddle_fr": "0-1 (1 = flaque la plus profonde)",
-    "wheel_in_puddle_rl": "0-1 (1 = flaque la plus profonde)",
-    "wheel_in_puddle_rr": "0-1 (1 = flaque la plus profonde)",
-    "surface_rumble_fl": "sans dimension",
-    "surface_rumble_fr": "sans dimension",
-    "surface_rumble_rl": "sans dimension",
-    "surface_rumble_rr": "sans dimension",
-    "car_ordinal": "identifiant",
-    "car_class": "indice 0-7 (4 = S1)",
+    "wheel_in_puddle_fl": "0-1 (1 = deepest puddle)",
+    "wheel_in_puddle_fr": "0-1 (1 = deepest puddle)",
+    "wheel_in_puddle_rl": "0-1 (1 = deepest puddle)",
+    "wheel_in_puddle_rr": "0-1 (1 = deepest puddle)",
+    "surface_rumble_fl": "dimensionless",
+    "surface_rumble_fr": "dimensionless",
+    "surface_rumble_rl": "dimensionless",
+    "surface_rumble_rr": "dimensionless",
+    "car_ordinal": "identifier",
+    "car_class": "index 0-7 (4 = S1)",
     "car_performance_index": "PI 100-999",
     "drivetrain_type": "0 = FWD, 1 = RWD, 2 = AWD",
-    "num_cylinders": "cylindres",
-    "car_category": "indice",
-    "horizon_unknown_1": "inconnu (non documente)",
-    "horizon_unknown_2": "inconnu (non documente)",
+    "num_cylinders": "cylinders",
+    "car_category": "index",
+    "horizon_unknown_1": "unknown (undocumented)",
+    "horizon_unknown_2": "unknown (undocumented)",
 }
 
 # Unites des canaux calcules par le pont.
@@ -157,6 +169,10 @@ DEFAULT_SELECTION: set[str] = {
     # consommateurs de refaire les memes conversions.
     "speed_kmh", "rpm_ratio", "throttle", "brake_pedal", "steer_norm",
     "g_lateral", "g_longitudinal", "slip_max",
+    # `gear` fait partie de la selection par defaut, donc son drapeau de
+    # changement de rapport aussi : sinon le consommateur voit le 11 sans
+    # avoir de quoi l'interpreter.
+    "shifting",
     "accel", "brake", "steer",
     "acceleration_x", "acceleration_y", "acceleration_z",
     "position_x", "position_y", "position_z",

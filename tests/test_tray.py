@@ -13,78 +13,78 @@ import tray
 class FauxPont:
     """Reproduit la surface de Bridge utilisee par l'interface."""
 
-    def __init__(self, vivant=True, erreur=None, paquets=0, vitesse=0.0):
-        self._vivant = vivant
-        self.error = erreur
-        self.packet_count = paquets
+    def __init__(self, alive=True, error=None, packets=0, speed=0.0):
+        self._alive = alive
+        self.error = error
+        self.packet_count = packets
         self.listen_port = 5300
-        self.latest_values = {"speed": vitesse}
+        self.latest_values = {"speed": speed}
 
     def is_alive(self):
-        return self._vivant
+        return self._alive
 
 
 class TestEtat(unittest.TestCase):
     def test_sans_pont(self):
-        self.assertEqual(tray.etat_pont(None), tray.ARRETE)
+        self.assertEqual(tray.bridge_state(None), tray.STOPPED)
 
     def test_erreur_prioritaire(self):
-        pont = FauxPont(vivant=True, erreur="bind impossible", paquets=500)
-        self.assertEqual(tray.etat_pont(pont), tray.ERREUR)
+        pont = FauxPont(alive=True, error="bind impossible", packets=500)
+        self.assertEqual(tray.bridge_state(pont), tray.FAILED)
 
     def test_thread_mort_sans_message(self):
-        self.assertEqual(tray.etat_pont(FauxPont(vivant=False)), tray.ERREUR)
+        self.assertEqual(tray.bridge_state(FauxPont(alive=False)), tray.FAILED)
 
     def test_aucun_paquet(self):
-        self.assertEqual(tray.etat_pont(FauxPont(paquets=0)), tray.SANS_FLUX)
+        self.assertEqual(tray.bridge_state(FauxPont(packets=0)), tray.NO_DATA)
 
     def test_paquets_mais_vehicule_immobile(self):
         """Distinction reprise de la trame d'etat : des paquets qui arrivent
         sans rien faire varier ne sont PAS un flux mort."""
-        pont = FauxPont(paquets=1000)
-        self.assertEqual(tray.etat_pont(pont, en_mouvement=False), tray.EN_ATTENTE)
+        pont = FauxPont(packets=1000)
+        self.assertEqual(tray.bridge_state(pont, moving=False), tray.IDLE)
 
     def test_telemetrie_en_mouvement(self):
-        pont = FauxPont(paquets=1000)
-        self.assertEqual(tray.etat_pont(pont, en_mouvement=True), tray.ACTIF)
+        pont = FauxPont(packets=1000)
+        self.assertEqual(tray.bridge_state(pont, moving=True), tray.ACTIVE)
 
     def test_mouvement_inconnu_considere_actif(self):
-        self.assertEqual(tray.etat_pont(FauxPont(paquets=10)), tray.ACTIF)
+        self.assertEqual(tray.bridge_state(FauxPont(packets=10)), tray.ACTIVE)
 
 
 class TestPresentation(unittest.TestCase):
     def test_chaque_etat_a_une_couleur_et_un_libelle(self):
-        for etat in (tray.ARRETE, tray.ERREUR, tray.SANS_FLUX,
-                     tray.EN_ATTENTE, tray.ACTIF):
+        for etat in (tray.STOPPED, tray.FAILED, tray.NO_DATA,
+                     tray.IDLE, tray.ACTIVE):
             with self.subTest(etat=etat):
-                self.assertIn(etat, tray.COULEURS)
-                self.assertIn(etat, tray.LIBELLES)
+                self.assertIn(etat, tray.COLOURS)
+                self.assertIn(etat, tray.LABELS)
 
     def test_couleurs_distinctes(self):
-        self.assertEqual(len(set(tray.COULEURS.values())), len(tray.COULEURS))
+        self.assertEqual(len(set(tray.COLOURS.values())), len(tray.COLOURS))
 
-    def test_infobulle_mentionne_les_paquets(self):
-        texte = tray.infobulle(tray.ACTIF, FauxPont(paquets=1234))
+    def test_tooltip_mentionne_les_paquets(self):
+        texte = tray.tooltip(tray.ACTIVE, FauxPont(packets=1234))
         self.assertIn("1234", texte)
 
-    def test_infobulle_sans_pont(self):
-        self.assertEqual(tray.infobulle(tray.ARRETE), tray.LIBELLES[tray.ARRETE])
+    def test_tooltip_sans_pont(self):
+        self.assertEqual(tray.tooltip(tray.STOPPED), tray.LABELS[tray.STOPPED])
 
     def test_image_produite(self):
-        image = tray.image_icone(tray.ACTIF, taille=32)
+        image = tray.icon_image(tray.ACTIVE, size=32)
         self.assertEqual(image.size, (32, 32))
         self.assertEqual(image.mode, "RGBA")
 
     def test_image_porte_la_couleur_de_l_etat(self):
         """Le pixel central doit etre celui de l'etat, sinon l'icone ne
         distinguerait rien."""
-        for etat, couleur in tray.COULEURS.items():
+        for etat, couleur in tray.COLOURS.items():
             with self.subTest(etat=etat):
-                image = tray.image_icone(etat, taille=64)
+                image = tray.icon_image(etat, size=64)
                 self.assertEqual(image.getpixel((32, 32))[:3], couleur)
 
     def test_coins_transparents(self):
-        image = tray.image_icone(tray.ACTIF, taille=64)
+        image = tray.icon_image(tray.ACTIVE, size=64)
         self.assertEqual(image.getpixel((0, 0))[3], 0)
 
 
@@ -123,18 +123,18 @@ class TestIndicateurDansLaFenetre(unittest.TestCase):
 
     @staticmethod
     def _hex(etat: str) -> str:
-        return "#%02x%02x%02x" % tray.COULEURS[etat]
+        return "#%02x%02x%02x" % tray.COLOURS[etat]
 
     def test_etat_initial_arrete(self):
-        self.assertEqual(self._couleur(), self._hex(tray.ARRETE))
-        self.assertEqual(self.app.state_var.get(), tray.LIBELLES[tray.ARRETE])
+        self.assertEqual(self._couleur(), self._hex(tray.STOPPED))
+        self.assertEqual(self.app.state_var.get(), tray.LABELS[tray.STOPPED])
 
     def test_chaque_etat_a_sa_couleur(self):
         cas = [
-            (FauxPont(paquets=0), 0.0, tray.SANS_FLUX),
-            (FauxPont(paquets=500), 0.0, tray.EN_ATTENTE),
-            (FauxPont(paquets=500), 30.0, tray.ACTIF),
-            (FauxPont(paquets=500, erreur="panne"), 30.0, tray.ERREUR),
+            (FauxPont(packets=0), 0.0, tray.NO_DATA),
+            (FauxPont(packets=500), 0.0, tray.IDLE),
+            (FauxPont(packets=500), 30.0, tray.ACTIVE),
+            (FauxPont(packets=500, error="panne"), 30.0, tray.FAILED),
         ]
         for pont, vitesse, attendu in cas:
             with self.subTest(etat=attendu):
@@ -143,26 +143,26 @@ class TestIndicateurDansLaFenetre(unittest.TestCase):
                 self.app._refresh_state()
                 self.root.update()
                 self.assertEqual(self._couleur(), self._hex(attendu))
-                self.assertEqual(self.app.state_var.get(), tray.LIBELLES[attendu])
+                self.assertEqual(self.app.state_var.get(), tray.LABELS[attendu])
 
     def test_detail_reste_distinct_du_libelle(self):
         """Le texte detaille (compteurs, erreurs) ne doit pas ecraser le
         libelle d'etat."""
         self.app.status_var.set("En ecoute sur le port 5300")
         self.root.update()
-        self.assertEqual(self.app.state_var.get(), tray.LIBELLES[tray.ARRETE])
+        self.assertEqual(self.app.state_var.get(), tray.LABELS[tray.STOPPED])
 
 
 class TestDisponibilite(unittest.TestCase):
     def test_detection_des_dependances(self):
         icone = tray.TrayIcon(lambda: None, lambda: None, lambda: None, lambda: None)
-        self.assertIsInstance(icone.disponible, bool)
+        self.assertIsInstance(icone.available, bool)
 
     def test_update_sans_demarrage_ne_leve_pas(self):
         """L'interface appelle update() a chaque rafraichissement, y compris
         quand l'icone n'a pas pu demarrer."""
         icone = tray.TrayIcon(lambda: None, lambda: None, lambda: None, lambda: None)
-        icone.update(tray.ACTIF, FauxPont(paquets=1))
+        icone.update(tray.ACTIVE, FauxPont(packets=1))
         icone.stop()
 
 
